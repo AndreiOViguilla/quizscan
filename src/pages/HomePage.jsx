@@ -141,8 +141,10 @@ export default function HomePage() {
           // Running locally — explain the limitation clearly
           throw new Error("YouTube transcript fetching only works when deployed to Vercel. For local testing, use the Topic tab instead and type the video topic manually.");
         } else {
-          // On Vercel but transcript failed (private video, no captions, etc.)
-          throw new Error(`Could not fetch transcript for this video. ${transcriptError || "The video may be private, age-restricted, or have no captions enabled."} Try a different video or use the Topic tab instead.`);
+          // Transcript failed — fall back to topic-based quiz using video URL as context
+          console.warn("Transcript failed, using fallback:", transcriptError);
+          const raw = await groq([{ role: "user", content: `Generate exactly ${numQ} quiz questions about the topic of this YouTube video: ${ytVal}. Based on the video URL, generate educational questions about what this video likely covers. Do NOT mention the video ID or URL in the questions. ${typeInstr} ${langNote} ${jsonInstr}` }]);
+          startQuiz(parseQuestions(raw)); return;
         }
 
         const raw = await groq([{ role: "user", content: prompt }]);
@@ -157,7 +159,8 @@ export default function HomePage() {
       const raw = await groq(messages, model);
       startQuiz(parseQuestions(raw));
     } catch (e) {
-      ctx.setError(`Failed: ${e.message}`);
+      console.error("Generate error:", e);
+      ctx.setError(e.message || "Something went wrong. Please try again.");
       ctx.navigate("home");
     }
   };
