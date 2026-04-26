@@ -4,7 +4,6 @@
 // Deploy to Vercel and call from frontend as /api/transcript?videoId=xxx
 
 const { YoutubeTranscript } = require("youtube-transcript");
-
 module.exports = async function handler(req, res) {
   // Allow CORS for local dev and production
   res.setHeader("Access-Control-Allow-Origin", "*");

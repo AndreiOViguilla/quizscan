@@ -108,23 +108,42 @@ export default function HomePage() {
         startQuiz(parseQuestions(raw)); return;
       } else if (tab === "youtube") {
         const videoId = ytVal.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/)?.[1];
-        if (!videoId) throw new Error("Could not extract video ID from URL. Make sure it's a valid YouTube link.");
+        if (!videoId) throw new Error("Could not extract video ID. Make sure it's a valid YouTube link like youtube.com/watch?v=xxx or youtu.be/xxx");
 
-        // Call our Vercel serverless function to get the real transcript
-        let transcriptText = "";
-        try {
-          const transcriptRes = await fetch(`/api/transcript?videoId=${videoId}`);
-          const transcriptData = await transcriptRes.json();
-          if (transcriptData.error) throw new Error(transcriptData.error);
-          transcriptText = transcriptData.text;
-        } catch (transcriptErr) {
-          // Fallback: tell Groq to use its knowledge about the video
-          transcriptText = null;
+        // Try to fetch real transcript from our Vercel API function
+        let transcriptText = null;
+        let transcriptError = null;
+
+        // Only try the API if we're on Vercel (not localhost)
+        const isVercel = window.location.hostname !== "localhost" && !window.location.hostname.startsWith("127.");
+
+        if (isVercel) {
+          try {
+            const transcriptRes = await fetch(`/api/transcript?videoId=${videoId}`);
+            const transcriptData = await transcriptRes.json();
+            if (transcriptData.error) {
+              transcriptError = transcriptData.error;
+            } else if (transcriptData.text) {
+              transcriptText = transcriptData.text;
+            }
+          } catch (e) {
+            transcriptError = e.message;
+          }
+        } else {
+          transcriptError = "local_dev";
         }
 
-        const prompt = transcriptText
-          ? `Generate exactly ${numQ} quiz questions from this YouTube video transcript:\n\n${transcriptText.substring(0, 4000)}\n\n${typeInstr} ${langNote} ${jsonInstr}`
-          : `Generate exactly ${numQ} quiz questions about the topic of this YouTube video: ${ytVal}\nUse your knowledge about what this video likely covers based on the URL and video ID: ${videoId}\n${typeInstr} ${langNote} ${jsonInstr}`;
+        let prompt;
+        if (transcriptText) {
+          // We have a real transcript — use it
+          prompt = `Generate exactly ${numQ} quiz questions based on this YouTube video transcript:\n\n${transcriptText.substring(0, 4000)}\n\n${typeInstr} ${langNote} ${jsonInstr}`;
+        } else if (transcriptError === "local_dev") {
+          // Running locally — explain the limitation clearly
+          throw new Error("YouTube transcript fetching only works when deployed to Vercel. For local testing, use the Topic tab instead and type the video topic manually.");
+        } else {
+          // On Vercel but transcript failed (private video, no captions, etc.)
+          throw new Error(`Could not fetch transcript for this video. ${transcriptError || "The video may be private, age-restricted, or have no captions enabled."} Try a different video or use the Topic tab instead.`);
+        }
 
         const raw = await groq([{ role: "user", content: prompt }]);
         startQuiz(parseQuestions(raw)); return;
@@ -279,7 +298,11 @@ export default function HomePage() {
         <div>
           <input className="field-input" placeholder="https://youtube.com/watch?v=..."
             value={ctx.ytVal} onChange={e => ctx.setYtVal(e.target.value)} />
-          <div className="alert-info" style={{ marginTop: 10 }}>Paste a YouTube video URL. AI generates questions based on the video topic.</div>
+          <div className="alert-info" style={{ marginTop: 10 }}>
+            Paste a YouTube video URL. The app fetches the real transcript and generates questions from what was actually said.
+            <br /><br />
+            <strong>Note:</strong> Transcript fetching requires deployment to Vercel. Running locally? Use the <strong>Topic</strong> tab and type the video subject instead.
+          </div>
         </div>
       )}
       {ctx.tab === "topic" && (
