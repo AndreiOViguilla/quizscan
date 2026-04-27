@@ -80,7 +80,7 @@ export default function ResultsPage() {
         <h2 className="page-heading">
           {pct === 100 ? "Perfect!" : pct >= 80 ? "Excellent!" : pct >= 60 ? "Good job!" : pct >= 40 ? "Keep going!" : "Keep studying!"}
         </h2>
-        <p className="page-sub">// quiz complete &middot; {questions.length} questions</p>
+        <p className="page-sub">// quiz complete · {questions.length} questions</p>
       </div>
 
       <div className="stats-row" style={{ marginBottom: 24 }}>

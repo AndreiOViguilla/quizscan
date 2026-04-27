@@ -283,15 +283,15 @@ export default function QuizPage() {
 
       <div className="quiz-action-row">
         <button className="btn-secondary" onClick={() => navigate("home")} style={{ fontSize: 12, padding: "8px 16px" }}>
-          &larr; Quit
+          ← Quit
         </button>
         <div>
           {!revealed && q.type === "mcq" && (
-            <button className="next-btn" onClick={() => submitAnswer()} disabled={selected === null}>Check &rarr;</button>
+            <button className="next-btn" onClick={() => submitAnswer()} disabled={selected === null}>Check →</button>
           )}
           {revealed && (
             <button className="next-btn" onClick={nextQuestion}>
-              {current + 1 >= questions.length ? "See Results &rarr;" : "Next &rarr;"}
+              {current + 1 >= questions.length ? "See Results →" : "Next →"}
             </button>
           )}
         </div>

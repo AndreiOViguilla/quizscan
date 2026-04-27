@@ -22,6 +22,7 @@ export default function HomePage() {
   const [manualQ, setManualQ] = useState("");
   const [manualA, setManualA] = useState("");
   const [manualList, setManualList] = useState([]);
+  const [ytStatus, setYtStatus] = useState(""); // shows inline under YT input
 
   // Check URL for shared quiz on mount
   useState(() => {
@@ -59,13 +60,50 @@ export default function HomePage() {
     return pages;
   };
 
-  const startQuiz = (qs) => {
+  const startQuiz = async (qs) => {
     ctx.setQuestions(qs);
     ctx.resetQuizState();
     ctx.quizStartTime.current = Date.now();
-    if (ctx.mode === "study") ctx.navigate("study");
-    else if (ctx.mode === "flashcard") ctx.navigate("flashcard");
-    else ctx.navigate("edit");
+    if (ctx.mode === "study") { ctx.navigate("study"); return; }
+    if (ctx.mode === "flashcard") { ctx.navigate("flashcard"); return; }
+    if (ctx.mpAfterGenerate) {
+      // Auto-create a room immediately
+      const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const name = ctx.playerName || "Host";
+      ctx.setMyMpName(name);
+      ctx.setMpStatus("Creating room...");
+      try {
+        await sbFetch("/rooms", "POST", { id: code, questions: qs, host: name });
+        const player = await sbFetch("/room_players", "POST", { room_id: code, name, score: 0, current_q: 0 });
+        if (player?.[0]?.id) ctx.myPlayerIdRef.current = player[0].id;
+        ctx.setMpCode(code);
+        ctx.setMpPlayers([{ name, score: 0, isHost: true }]);
+        ctx.setMpMode("host");
+        ctx.setMpStatus("Waiting for players...");
+        const rt = new SupabaseRealtime(code, (record) => {
+          if (record?.name) ctx.setMpPlayers(prev => {
+            const ex = prev.find(p => p.name === record.name);
+            return ex ? prev.map(p => p.name === record.name ? { ...p, score: record.score } : p)
+              : [...prev, { name: record.name, score: record.score || 0 }];
+          });
+        });
+        rt.connect();
+        ctx.mpRealtimeRef.current = rt;
+        const poll = setInterval(async () => {
+          try {
+            const players = await sbFetch(`/room_players?room_id=eq.${code}&select=name,score,current_q`);
+            if (players) ctx.setMpPlayers(players.map((p, i) => ({ ...p, isHost: i === 0 })));
+          } catch {}
+        }, 3000);
+        setTimeout(() => clearInterval(poll), 300000);
+        ctx.navigate("multiplayer");
+      } catch (e) {
+        ctx.setMpError(`Failed to create room: ${e.message}`);
+        ctx.navigate("edit");
+      }
+      return;
+    }
+    ctx.navigate("edit");
   };
 
   const generate = async () => {
@@ -104,50 +142,120 @@ export default function HomePage() {
         blocks.push({ type: "text", text: `Quiz generator. Read ALL text in PDF. Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}` });
         messages = [{ role: "user", content: blocks }];
       } else if (tab === "url") {
-        const raw = await groq([{ role: "user", content: `Fetch content from: ${urlVal}\nGenerate exactly ${numQ} quiz questions from it.\n${typeInstr} ${langNote} ${jsonInstr}` }]);
+        // Actually fetch the URL content via a CORS proxy
+        let pageText = null;
+        const proxies = [
+          `https://api.allorigins.win/get?url=${encodeURIComponent(urlVal)}`,
+          `https://corsproxy.io/?${encodeURIComponent(urlVal)}`,
+        ];
+        for (const proxyUrl of proxies) {
+          try {
+            const res = await fetch(proxyUrl);
+            let html = "";
+            const ct = res.headers.get("content-type") || "";
+            if (ct.includes("json")) {
+              const data = await res.json();
+              html = data?.contents || "";
+            } else {
+              html = await res.text();
+            }
+            if (html && html.length > 200) {
+              pageText = html
+                .replace(/<script[\s\S]*?<\/script>/gi, "")
+                .replace(/<style[\s\S]*?<\/style>/gi, "")
+                .replace(/<[^>]+>/g, " ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .substring(0, 4000);
+              break;
+            }
+          } catch { continue; }
+        }
+        const urlPrompt = pageText
+          ? "Generate exactly " + numQ + " quiz questions from this webpage content:\n\n" + pageText + "\n\n" + typeInstr + " " + langNote + " " + jsonInstr
+          : "Generate exactly " + numQ + " quiz questions about the topic of this URL: " + urlVal + ". Use your knowledge about what this page likely contains. " + typeInstr + " " + langNote + " " + jsonInstr;
+        const raw = await groq([{ role: "user", content: urlPrompt }]);
         startQuiz(parseQuestions(raw)); return;
       } else if (tab === "youtube") {
         const videoId = ytVal.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/)?.[1];
-        if (!videoId) throw new Error("Could not extract video ID. Make sure it's a valid YouTube link like youtube.com/watch?v=xxx or youtu.be/xxx");
+        if (!videoId) throw new Error("Could not extract video ID. Make sure it is a valid YouTube link.");
 
-        // Try to fetch real transcript from our Vercel API function
         let transcriptText = null;
-        let transcriptError = null;
+        let debugLog = [];
+        const log = (msg) => { debugLog.push(msg); setYtStatus([...debugLog].join("\n")); };
 
-        // Only try the API if we're on Vercel (not localhost)
-        const isVercel = window.location.hostname !== "localhost" && !window.location.hostname.startsWith("127.");
+        // Try fetching transcript - works on Vercel, shows error on localhost
+        log(`Host: ${window.location.hostname}`);
+        log(`VideoID: ${videoId}`);
 
-        if (isVercel) {
-          try {
-            const transcriptRes = await fetch(`/api/transcript?videoId=${videoId}`);
-            const transcriptData = await transcriptRes.json();
-            if (transcriptData.error) {
-              transcriptError = transcriptData.error;
-            } else if (transcriptData.text) {
-              transcriptText = transcriptData.text;
-            }
-          } catch (e) {
-            transcriptError = e.message;
+        try {
+          log("Trying /api/transcript...");
+          const res = await fetch(`/api/transcript?videoId=${videoId}`);
+          log(`API status: ${res.status}`);
+          const data = await res.json();
+          log(`API response keys: ${Object.keys(data).join(", ")}`);
+          if (data.text && data.text.length > 100) {
+            transcriptText = data.text;
+            log(`Got transcript: ${data.text.length} chars`);
+          } else if (data.error) {
+            log(`API error: ${data.error}`);
+          } else {
+            log("API returned no text and no error");
           }
-        } else {
-          transcriptError = "local_dev";
+        } catch (e) {
+          log(`API exception: ${e.message} (on localhost this is expected - deploy to Vercel for transcripts)`);
         }
 
-        let prompt;
-        if (transcriptText) {
-          // We have a real transcript — use it
-          prompt = `Generate exactly ${numQ} quiz questions based on this YouTube video transcript:\n\n${transcriptText.substring(0, 4000)}\n\n${typeInstr} ${langNote} ${jsonInstr}`;
-        } else if (transcriptError === "local_dev") {
-          // Running locally — explain the limitation clearly
-          throw new Error("YouTube transcript fetching only works when deployed to Vercel. For local testing, use the Topic tab instead and type the video topic manually.");
-        } else {
-          // Transcript failed — fall back to topic-based quiz using video URL as context
-          console.warn("Transcript failed, using fallback:", transcriptError);
-          const raw = await groq([{ role: "user", content: `Generate exactly ${numQ} quiz questions about the topic of this YouTube video: ${ytVal}. Based on the video URL, generate educational questions about what this video likely covers. Do NOT mention the video ID or URL in the questions. ${typeInstr} ${langNote} ${jsonInstr}` }]);
-          startQuiz(parseQuestions(raw)); return;
+        // If transcript failed or local, use multiple proxies to fetch YouTube page
+        if (!transcriptText) {
+          const proxiesToTry = [
+            `https://api.allorigins.win/get?url=${encodeURIComponent("https://www.youtube.com/watch?v=" + videoId)}`,
+            `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent("https://www.youtube.com/watch?v=" + videoId)}`,
+          ];
+          for (const proxyUrl of proxiesToTry) {
+            try {
+              log(`Trying proxy: ${proxyUrl.substring(0, 50)}...`);
+              const proxyRes = await fetch(proxyUrl);
+              log(`Proxy status: ${proxyRes.status}`);
+              let html = "";
+              const ct = proxyRes.headers.get("content-type") || "";
+              if (ct.includes("json")) {
+                const proxyData = await proxyRes.json();
+                html = proxyData?.contents || proxyData?.data || "";
+              } else {
+                html = await proxyRes.text();
+              }
+              log(`HTML length: ${html.length}`);
+              if (html.length > 500) {
+                const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+                const metaDesc = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']{20,500})["']/i);
+                const ytDesc = html.match(/"shortDescription":"([^"]{20,1000})"/);
+                const title = (titleMatch?.[1] || "").replace(/\s*[-|]\s*YouTube\s*$/, "").trim();
+                const desc = metaDesc?.[1] || ytDesc?.[1] || "";
+                log(`Title found: ${title}`);
+                log(`Desc found: ${desc.substring(0, 80)}`);
+                if (title.length > 3) {
+                  transcriptText = `Video title: "${title}". ${desc ? "Content description: " + desc.substring(0, 500) : ""}`;
+                  break;
+                }
+              }
+            } catch (e) {
+              log(`Proxy exception: ${e.message}`);
+            }
+          }
         }
 
-        const raw = await groq([{ role: "user", content: prompt }]);
+        // Update final status
+        setYtStatus(debugLog.join("\n"));
+
+        let ytPrompt;
+        if (transcriptText && transcriptText.length > 100) {
+          ytPrompt = "Generate exactly " + numQ + " quiz questions STRICTLY based on the actual content described here:\n\n" + transcriptText.substring(0, 4000) + "\n\n" + typeInstr + " " + langNote + " " + jsonInstr + "\n\nCRITICAL: Questions must be about the SPECIFIC content (e.g. if it is a food challenge video, ask about the food, the challenge, the people). NEVER ask generic science questions. NEVER mention video IDs.";
+        } else {
+          ytPrompt = "Generate exactly " + numQ + " quiz questions about this YouTube video URL: " + ytVal + ". The video ID is " + videoId + ". Generate questions specifically about what this exact video covers — its topic, content, people involved. Do NOT generate generic unrelated questions. " + typeInstr + " " + langNote + " " + jsonInstr;
+        }
+
+        const raw = await groq([{ role: "user", content: ytPrompt }]);
         startQuiz(parseQuestions(raw)); return;
       } else if (tab === "topic") {
         const raw = await groq([{ role: "user", content: `Generate exactly ${numQ} quiz questions about: ${topicVal}\n${typeInstr} ${langNote} ${jsonInstr}` }]);
@@ -160,13 +268,18 @@ export default function HomePage() {
       startQuiz(parseQuestions(raw));
     } catch (e) {
       console.error("Generate error:", e);
-      ctx.setError(e.message || "Something went wrong. Please try again.");
+      const msg = e.message || "Something went wrong. Please try again.";
+      ctx.setError(msg);
+      // If it was a youtube error, also update ytStatus
+      if (ctx.tab === "youtube") {
+        setYtStatus(prev => prev + "\nFATAL ERROR: " + msg);
+      }
       ctx.navigate("home");
     }
   };
 
   const hostGame = async () => {
-    if (!ctx.questions.length) { ctx.setError("Generate a quiz first, then create the room."); return; }
+    if (!ctx.questions.length) return; // button is disabled so this shouldn't trigger
     ctx.setMpError("");
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     const name = ctx.playerName || "Host";
@@ -248,11 +361,16 @@ export default function HomePage() {
   const genDisabled = ["pdf", "image"].includes(ctx.tab) && !ctx.file;
 
   return (
-    <div className="page">
+    <div className="page" style={{ maxWidth: 1200 }}>
       <div className="home-hero">
         <h1 className="home-title">Turn any content<br />into a <span className="green">quiz.</span></h1>
-        <p className="home-sub">// PDF &middot; image &middot; text &middot; URL &middot; YouTube &middot; topic &rarr; instant quiz</p>
+        <p className="home-sub">// PDF · image · text · URL · YouTube · topic → instant quiz</p>
       </div>
+
+      {/* Two column layout */}
+      <div style={{ display: "flex", gap: 32, alignItems: "flex-start" }}>
+      {/* LEFT COLUMN — Quiz stuff */}
+      <div style={{ flex: 2, minWidth: 0 }}>
 
       {/* Mode selector */}
       <div className="home-modes">
@@ -300,12 +418,38 @@ export default function HomePage() {
       {ctx.tab === "youtube" && (
         <div>
           <input className="field-input" placeholder="https://youtube.com/watch?v=..."
-            value={ctx.ytVal} onChange={e => ctx.setYtVal(e.target.value)} />
+            value={ctx.ytVal} onChange={e => { ctx.setYtVal(e.target.value); setYtStatus(""); }} />
           <div className="alert-info" style={{ marginTop: 10 }}>
             Paste a YouTube video URL. The app fetches the real transcript and generates questions from what was actually said.
             <br /><br />
-            <strong>Note:</strong> Transcript fetching requires deployment to Vercel. Running locally? Use the <strong>Topic</strong> tab and type the video subject instead.
+            <strong>Note:</strong> Transcript fetching requires deployment to Vercel. Running locally? Use the <strong>Topic</strong> tab instead.
           </div>
+          {ytStatus && (
+            <div style={{
+              marginTop: 10, padding: "14px 16px",
+              background: "#000", border: "2px solid #2e7d32",
+              borderRadius: 4, fontFamily: "'Space Mono', monospace",
+              fontSize: 12, lineHeight: 2, wordBreak: "break-all",
+              maxHeight: 300, overflowY: "auto"
+            }}>
+              <div style={{ color: "#4caf50", marginBottom: 8, fontWeight: 700, fontSize: 13 }}>
+                YouTube Status Log
+              </div>
+              {ytStatus.split("\n").map((line, i) => {
+                const isError = /error|fail|exception|blocked|403|500/i.test(line);
+                const isSuccess = /got transcript|title found|desc found|chars|200/i.test(line);
+                return (
+                  <div key={i} style={{
+                    color: isError ? "#ff5252" : isSuccess ? "#4caf50" : "#81c784",
+                    paddingLeft: 8, borderLeft: `2px solid ${isError ? "#ff5252" : isSuccess ? "#4caf50" : "#1a3d1a"}`
+                    , marginBottom: 4
+                  }}>
+                    {isError ? "✗" : isSuccess ? "✓" : "›"} {line}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
       {ctx.tab === "topic" && (
@@ -356,78 +500,123 @@ export default function HomePage() {
           <Toggle on={ctx.useStreak} onChange={ctx.setUseStreak} label="Streak" />
           <Toggle on={ctx.useSounds} onChange={ctx.setUseSounds} label="Sounds" />
           {ctx.tab === "topic" && <Toggle on={ctx.autoDiff} onChange={ctx.setAutoDiff} label="Auto-difficulty" />}
+          <Toggle on={ctx.mpAfterGenerate} onChange={ctx.setMpAfterGenerate} label="Host room after generate" />
         </div>
       )}
 
       {ctx.error && <div className="alert-error">! {ctx.error}</div>}
 
       <button className="btn-primary" style={{ marginTop: 28 }} onClick={generate} disabled={genDisabled}>
-        Generate {ctx.mode === "study" ? "Study Guide" : ctx.mode === "flashcard" ? "Flashcards" : "Quiz"} &rarr;
+        Generate {ctx.mode === "study" ? "Study Guide" : ctx.mode === "flashcard" ? "Flashcards" : "Quiz"} →
       </button>
 
-      <hr className="section-divider" />
+      </div> {/* end left column */}
 
-      {/* Multiplayer */}
-      <div className="collapsible">
-        <div className="collapsible-header" onClick={() => setShowMp(m => !m)}>
-          MULTIPLAYER (Supabase — works across devices) {showMp ? "^" : "v"}
-        </div>
-        {showMp && (
-          <div className="collapsible-body">
+      {/* RIGHT COLUMN — Multiplayer + Manual */}
+      <div style={{ flex: 1, minWidth: 280, position: "sticky", top: 80 }}>
+
+        {/* Multiplayer panel */}
+        <div style={{
+          background: "var(--bg2,#040f04)", border: "1px solid #2e7d32",
+          borderRadius: 8, overflow: "hidden", marginBottom: 16
+        }}>
+          <div style={{
+            background: "#0d2b0d", padding: "14px 20px",
+            fontFamily: "'Space Mono',monospace", fontSize: 13,
+            fontWeight: 700, color: "#4caf50", letterSpacing: 1,
+            borderBottom: "1px solid #1a3d1a"
+          }}>
+            MULTIPLAYER
+            <div style={{ fontSize: 10, color: "#2e7d32", fontWeight: 400, marginTop: 2, letterSpacing: 0 }}>
+              Supabase — works across devices globally
+            </div>
+          </div>
+          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
             {ctx.mpError && <div className="alert-error">! {ctx.mpError}</div>}
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-              <div style={{ flex: 1 }}>
-                <label className="field-label">Host a room</label>
-                <button className="btn-secondary" style={{ width: "100%" }} onClick={hostGame}>Create Room</button>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label className="field-label">Join a room</label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input className="field-input" placeholder="Room code" maxLength={4}
-                    value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
-                    style={{ letterSpacing: 4, fontWeight: 700, textAlign: "center" }} />
-                  <button className="btn-secondary" onClick={joinGame}>Join</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
 
-      {/* Manual creator */}
-      <div className="collapsible" style={{ marginTop: 12 }}>
-        <div className="collapsible-header" onClick={() => setShowManual(m => !m)}>
-          MANUAL QUESTION CREATOR {showManual ? "^" : "v"}
-        </div>
-        {showManual && (
-          <div className="collapsible-body">
-            <input className="field-input" placeholder="Question" value={manualQ} onChange={e => setManualQ(e.target.value)} />
-            <div style={{ display: "flex", gap: 8 }}>
-              <input className="field-input" placeholder="Answer" value={manualA} onChange={e => setManualA(e.target.value)} />
-              <button className="btn-secondary" style={{ whiteSpace: "nowrap" }} onClick={() => {
-                if (!manualQ.trim() || !manualA.trim()) return;
-                setManualList(l => [...l, { type: "fill", question: manualQ.trim(), answer: manualA.trim(), explanation: "" }]);
-                setManualQ(""); setManualA("");
-              }}>+ Add</button>
-            </div>
-            {manualList.map((mq, i) => (
-              <div key={i} className="card-sm" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{mq.question}</div>
-                  <div style={{ fontSize: 11, color: "#4caf50", fontFamily: "'Space Mono',monospace", marginTop: 3 }}>&rarr; {mq.answer}</div>
+            <div>
+              <label className="field-label">Host a game</label>
+              {ctx.questions.length > 0 ? (
+                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 11, color: "#4caf50", marginBottom: 10, padding: "6px 10px", background: "#0d2b0d", borderRadius: 3, border: "1px solid #2e7d32" }}>
+                  + {ctx.questions.length} questions ready
                 </div>
-                <button style={{ background: "transparent", border: "none", color: "#c62828", cursor: "pointer", fontSize: 16 }}
-                  onClick={() => setManualList(l => l.filter((_, j) => j !== i))}>x</button>
-              </div>
-            ))}
-            {manualList.length > 0 && (
-              <button className="btn-primary" onClick={() => startQuiz(manualList)}>
-                Start with {manualList.length} question{manualList.length !== 1 ? "s" : ""} &rarr;
+              ) : (
+                <p style={{ fontSize: 12, color: "#555", fontFamily: "'Space Mono',monospace", marginBottom: 10, lineHeight: 1.6 }}>
+                  Generate a quiz first, then create a room.
+                </p>
+              )}
+              <button
+                className={ctx.questions.length > 0 ? "btn-primary" : "btn-secondary"}
+                style={{ width: "100%", opacity: ctx.questions.length > 0 ? 1 : 0.4, cursor: ctx.questions.length > 0 ? "pointer" : "not-allowed" }}
+                onClick={ctx.questions.length > 0 ? hostGame : () => ctx.setError("Generate a quiz first before creating a room.")}
+                disabled={ctx.questions.length === 0}
+              >
+                {ctx.questions.length > 0 ? "Create Room →" : "Generate quiz first"}
               </button>
-            )}
+            </div>
+
+            <div style={{ borderTop: "1px solid #1a3d1a", paddingTop: 16 }}>
+              <label className="field-label">Join a game</label>
+              <p style={{ fontSize: 12, color: "#555", fontFamily: "'Space Mono',monospace", marginBottom: 10, lineHeight: 1.6 }}>
+                Enter the 4-letter room code from your host.
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input className="field-input" placeholder="CODE" maxLength={4}
+                  value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
+                  style={{ letterSpacing: 6, fontWeight: 700, textAlign: "center", fontSize: 18 }} />
+                <button className="btn-secondary" onClick={joinGame}>Join</button>
+              </div>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+
+        {/* Manual creator panel */}
+        <div style={{
+          background: "var(--bg2,#040f04)", border: "1px solid #1a3d1a",
+          borderRadius: 8, overflow: "hidden"
+        }}>
+          <div style={{
+            background: "#0d2b0d", padding: "14px 20px",
+            fontFamily: "'Space Mono',monospace", fontSize: 13,
+            fontWeight: 700, color: "#4caf50", letterSpacing: 1,
+            borderBottom: "1px solid #1a3d1a", cursor: "pointer",
+            display: "flex", justifyContent: "space-between"
+          }} onClick={() => setShowManual(m => !m)}>
+            MANUAL QUESTIONS
+            <span style={{ color: "#2e7d32" }}>{showManual ? "^" : "v"}</span>
+          </div>
+          {showManual && (
+            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+              <input className="field-input" placeholder="Question" value={manualQ} onChange={e => setManualQ(e.target.value)} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <input className="field-input" placeholder="Answer" value={manualA} onChange={e => setManualA(e.target.value)} />
+                <button className="btn-secondary" style={{ whiteSpace: "nowrap" }} onClick={() => {
+                  if (!manualQ.trim() || !manualA.trim()) return;
+                  setManualList(l => [...l, { type: "fill", question: manualQ.trim(), answer: manualA.trim(), explanation: "" }]);
+                  setManualQ(""); setManualA("");
+                }}>+ Add</button>
+              </div>
+              {manualList.map((mq, i) => (
+                <div key={i} className="card-sm" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{mq.question}</div>
+                    <div style={{ fontSize: 11, color: "#4caf50", fontFamily: "'Space Mono',monospace", marginTop: 3 }}>→ {mq.answer}</div>
+                  </div>
+                  <button style={{ background: "transparent", border: "none", color: "#c62828", cursor: "pointer", fontSize: 16 }}
+                    onClick={() => setManualList(l => l.filter((_, j) => j !== i))}>x</button>
+                </div>
+              ))}
+              {manualList.length > 0 && (
+                <button className="btn-primary" onClick={() => startQuiz(manualList)}>
+                  Start with {manualList.length} question{manualList.length !== 1 ? "s" : ""} →
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+      </div> {/* end right column */}
+      </div> {/* end two column layout */}
     </div>
   );
 }

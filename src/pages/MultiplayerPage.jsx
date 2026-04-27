@@ -23,7 +23,7 @@ export default function MultiplayerPage() {
   return (
     <div className="page">
       <h2 className="page-heading">{mpMode === "host" ? "Game Lobby" : "Joined Room"}</h2>
-      <p className="page-sub">// powered by Supabase &mdash; works across any device globally</p>
+      <p className="page-sub">// powered by Supabase — works across any device globally</p>
       <div className="mp-room-code">{mpCode}</div>
       <div className="mp-status-text">
         {mpStatus || (mpMode === "host"
@@ -45,14 +45,14 @@ export default function MultiplayerPage() {
         <button className="btn-primary" onClick={startGame} style={{ marginBottom: 12 }}>
           {mpMode === "host"
             ? `Start Game (${mpPlayers.length} player${mpPlayers.length !== 1 ? "s" : ""})`
-            : "Start Playing"} &rarr;
+            : "Start Playing"} →
         </button>
       )}
       <div className="alert-info">
         Share the code <strong>{mpCode}</strong> with friends — they go to this site, click Join, enter the code and play live!
       </div>
       <div style={{ marginTop: 20 }}>
-        <button className="btn-secondary" onClick={leaveRoom}>&larr; Leave Room</button>
+        <button className="btn-secondary" onClick={leaveRoom}>← Leave Room</button>
       </div>
     </div>
   );

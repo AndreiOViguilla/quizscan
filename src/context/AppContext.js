@@ -25,6 +25,7 @@ export function AppProvider({ children }) {
   const [useStreak, setUseStreak] = useState(true);
   const [useSounds, setUseSounds] = useState(true);
   const [autoDiff, setAutoDiff] = useState(false);
+  const [mpAfterGenerate, setMpAfterGenerate] = useState(false);
 
   // Quiz state
   const [questions, setQuestions] = useState([]);
@@ -108,6 +109,7 @@ export function AppProvider({ children }) {
       useStreak, setUseStreak,
       useSounds, setUseSounds,
       autoDiff, setAutoDiff,
+      mpAfterGenerate, setMpAfterGenerate,
       questions, setQuestions,
       current, setCurrent,
       answers, setAnswers,

@@ -16,7 +16,7 @@ export default function HistoryPage() {
     <div className="page">
       <BackButton to="home" />
       <h2 className="page-heading">Quiz History</h2>
-      <p className="page-sub">// your last 20 quizzes &middot; click Replay to retake any</p>
+      <p className="page-sub">// your last 20 quizzes · click Replay to retake any</p>
       {history.length === 0 ? (
         <div className="table-empty">No history yet. Complete a quiz to see it here!</div>
       ) : (

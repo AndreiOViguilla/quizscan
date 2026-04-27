@@ -67,7 +67,7 @@ export function Footer() {
   return (
     <footer className="footer">
       <div className="footer-left">
-        <span>QuizScan</span> &mdash; AI-powered quiz generator
+        <span>QuizScan</span> — AI-powered quiz generator
       </div>
       <div className="footer-right">
         <span className="footer-link" onClick={() => navigate("home")}>Home</span>
@@ -82,7 +82,7 @@ export function BackButton({ to = "home", label = "Back" }) {
   const { navigate } = useApp();
   return (
     <button className="back-btn" onClick={() => navigate(to)}>
-      &larr; {label}
+      ← {label}
     </button>
   );
 }

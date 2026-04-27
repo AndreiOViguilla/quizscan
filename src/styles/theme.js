@@ -63,7 +63,7 @@ export function makeGlobalStyles(dark) {
       transition: all .15s; margin-bottom: 28px; letter-spacing: .5px;
     }
     .back-btn:hover { border-color: #4caf50; color: #4caf50; }
-    .back-btn::before { content: '&larr;'; }
+    
 
     /* ── PAGE HEADER ── */
     .page-heading { font-size: 28px; font-weight: 800; color: ${v.txt}; margin-bottom: 6px; }

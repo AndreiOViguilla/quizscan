@@ -8,7 +8,7 @@ export default function LeaderboardPage() {
     <div className="page">
       <BackButton to="home" />
       <h2 className="page-heading">Leaderboard</h2>
-      <p className="page-sub">// top scores on this device &middot; enter your name on home screen to appear here</p>
+      <p className="page-sub">// top scores on this device · enter your name on home screen to appear here</p>
       {lb.length === 0 ? (
         <div className="table-empty">No scores yet. Complete a quiz with your name to appear here!</div>
       ) : (
