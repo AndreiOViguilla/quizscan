@@ -175,7 +175,7 @@ export default function HomePage() {
           ? "Generate exactly " + numQ + " quiz questions from this webpage content:\n\n" + pageText + "\n\n" + typeInstr + " " + langNote + " " + jsonInstr
           : "Generate exactly " + numQ + " quiz questions about the topic of this URL: " + urlVal + ". Use your knowledge about what this page likely contains. " + typeInstr + " " + langNote + " " + jsonInstr;
         const raw = await groq([{ role: "user", content: urlPrompt }]);
-        startQuiz(parseQuestions(raw)); return;
+        await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "youtube") {
         const videoId = ytVal.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/)?.[1];
         if (!videoId) throw new Error("Could not extract video ID. Make sure it is a valid YouTube link.");
@@ -250,30 +250,31 @@ export default function HomePage() {
 
         let ytPrompt;
         if (transcriptText && transcriptText.length > 100) {
-          ytPrompt = "Generate exactly " + numQ + " quiz questions STRICTLY based on the actual content described here:\n\n" + transcriptText.substring(0, 4000) + "\n\n" + typeInstr + " " + langNote + " " + jsonInstr + "\n\nCRITICAL: Questions must be about the SPECIFIC content (e.g. if it is a food challenge video, ask about the food, the challenge, the people). NEVER ask generic science questions. NEVER mention video IDs.";
+          ytPrompt = "Generate exactly " + numQ + " quiz questions STRICTLY based on the actual content described here:\n\n" + transcriptText.substring(0, 6000) + "\n\n" + typeInstr + " " + langNote + " " + jsonInstr + "\n\nCRITICAL: Questions must be about the SPECIFIC content shown above. NEVER ask generic unrelated questions. NEVER mention video IDs.";
         } else {
           ytPrompt = "Generate exactly " + numQ + " quiz questions about this YouTube video URL: " + ytVal + ". The video ID is " + videoId + ". Generate questions specifically about what this exact video covers — its topic, content, people involved. Do NOT generate generic unrelated questions. " + typeInstr + " " + langNote + " " + jsonInstr;
         }
 
         const raw = await groq([{ role: "user", content: ytPrompt }]);
-        startQuiz(parseQuestions(raw)); return;
+        await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "topic") {
-        const raw = await groq([{ role: "user", content: `Generate exactly ${numQ} quiz questions about: ${topicVal}\n${typeInstr} ${langNote} ${jsonInstr}` }]);
-        startQuiz(parseQuestions(raw)); return;
+        const raw = await groq([{ role: "user", content: `Generate exactly ${numQ} quiz questions about: ${topicVal}\n${typeInstr} ${langNote} ${jsonInstr}` }], "llama-3.3-70b-versatile", numQ > 25 ? 8000 : 4000);
+        await startQuiz(parseQuestions(raw)); return;
       } else {
         messages = [{ role: "user", content: `Quiz generator. Generate exactly ${numQ} questions from:\n\n${text.trim().substring(0, 4000)}\n\n${typeInstr} ${langNote} ${jsonInstr}` }];
       }
 
       const raw = await groq(messages, model);
-      startQuiz(parseQuestions(raw));
+      await startQuiz(parseQuestions(raw));
     } catch (e) {
       console.error("Generate error:", e);
       const msg = e.message || "Something went wrong. Please try again.";
-      ctx.setError(msg);
       // If it was a youtube error, also update ytStatus
       if (ctx.tab === "youtube") {
         setYtStatus(prev => prev + "\nFATAL ERROR: " + msg);
       }
+      // Don't navigate away — stay on home and show error
+      ctx.setError(msg);
       ctx.navigate("home");
     }
   };
@@ -467,7 +468,7 @@ export default function HomePage() {
         <div>
           <label className="field-label">Questions</label>
           <select className="field-select" value={ctx.numQ} onChange={e => ctx.setNumQ(Number(e.target.value))}>
-            {[5, 10, 15, 20, 25].map(n => <option key={n} value={n}>{n}</option>)}
+            {[5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
         {ctx.mode !== "study" && (

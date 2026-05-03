@@ -1,11 +1,11 @@
 import { GROQ_KEY, SUPABASE_URL, SUPABASE_KEY } from "./constants";
 
 // ─── GROQ ─────────────────────────────────────────────────────────────────────
-export async function groq(messages, model = "llama-3.3-70b-versatile") {
+export async function groq(messages, model = "llama-3.3-70b-versatile", maxTokens = 8000) {
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_KEY}` },
-    body: JSON.stringify({ model, max_tokens: 4000, messages }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);

@@ -86,7 +86,7 @@ export function AppProvider({ children }) {
   };
 
   const navigate = (to) => {
-    setError("");
+    if (to !== "home") setError("");
     setPage(to);
   };
 
