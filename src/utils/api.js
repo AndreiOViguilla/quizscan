@@ -1,39 +1,14 @@
-import { HF_KEY, SUPABASE_URL, SUPABASE_KEY } from "./constants";
+import { GROQ_KEY, SUPABASE_URL, SUPABASE_KEY } from "./constants";
 
-// ─── HUGGING FACE (via OpenAI-compatible endpoint — CORS friendly) ─────────────
-const HF_BASE = "https://router.huggingface.co/novita/v3/openai";
-const HF_MODEL = "mistralai/mistral-7b-instruct";
-
-export async function groq(messages, _model, maxTokens = 3000) {
-  // Filter out any vision content (image_url blocks) — text only for this model
-  const textMessages = messages.map(m => {
-    if (Array.isArray(m.content)) {
-      const textPart = m.content.find(c => c.type === "text");
-      return { role: m.role, content: textPart?.text || "" };
-    }
-    return m;
-  });
-
-  const res = await fetch(`${HF_BASE}/chat/completions`, {
+// ─── GROQ ─────────────────────────────────────────────────────────────────────
+export async function groq(messages, model = "llama-3.3-70b-versatile", maxTokens = 8000) {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${HF_KEY}`,
-    },
-    body: JSON.stringify({
-      model: HF_MODEL,
-      max_tokens: maxTokens,
-      messages: textMessages,
-    }),
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_KEY}` },
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
   });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`HF API error ${res.status}: ${err}`);
-  }
-
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message || data.error);
+  if (data.error) throw new Error(data.error.message);
   return data.choices?.[0]?.message?.content || "";
 }
 
