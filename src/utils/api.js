@@ -1,64 +1,40 @@
 import { HF_KEY, SUPABASE_URL, SUPABASE_KEY } from "./constants";
 
-// ─── HUGGING FACE ─────────────────────────────────────────────────────────────
-// Uses Hugging Face Inference API with a capable open model
-const HF_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1";
-const HF_URL = `https://api-inference.huggingface.co/models/${HF_MODEL}`;
+// ─── HUGGING FACE (via OpenAI-compatible endpoint — CORS friendly) ─────────────
+const HF_BASE = "https://router.huggingface.co/novita/v3/openai";
+const HF_MODEL = "mistralai/mistral-7b-instruct";
 
-export async function groq(messages, _model, maxTokens = 4096) {
-  // Convert OpenAI-style messages to a single prompt string (Mixtral instruct format)
-  const prompt = messages.map(m => {
-    if (m.role === "system") return `[INST] <<SYS>>\n${m.content}\n<</SYS>>\n\n`;
-    if (m.role === "user") {
-      // Handle vision content arrays (image + text)
-      if (Array.isArray(m.content)) {
-        const textPart = m.content.find(c => c.type === "text");
-        return `[INST] ${textPart?.text || ""} [/INST]`;
-      }
-      return `[INST] ${m.content} [/INST]`;
+export async function groq(messages, _model, maxTokens = 3000) {
+  // Filter out any vision content (image_url blocks) — text only for this model
+  const textMessages = messages.map(m => {
+    if (Array.isArray(m.content)) {
+      const textPart = m.content.find(c => c.type === "text");
+      return { role: m.role, content: textPart?.text || "" };
     }
-    if (m.role === "assistant") return m.content;
-    return "";
-  }).join("\n");
+    return m;
+  });
 
-  const res = await fetch(HF_URL, {
+  const res = await fetch(`${HF_BASE}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${HF_KEY}`,
     },
     body: JSON.stringify({
-      inputs: prompt,
-      parameters: {
-        max_new_tokens: maxTokens,
-        temperature: 0.7,
-        top_p: 0.95,
-        do_sample: true,
-        return_full_text: false,
-      },
+      model: HF_MODEL,
+      max_tokens: maxTokens,
+      messages: textMessages,
     }),
   });
 
   if (!res.ok) {
     const err = await res.text();
-    // Model loading — retry after delay
-    if (res.status === 503) {
-      await new Promise(r => setTimeout(r, 8000));
-      return groq(messages, _model, maxTokens);
-    }
     throw new Error(`HF API error ${res.status}: ${err}`);
   }
 
   const data = await res.json();
-
-  // HF returns array of { generated_text }
-  if (Array.isArray(data) && data[0]?.generated_text !== undefined) {
-    return data[0].generated_text;
-  }
-  if (data.generated_text) return data.generated_text;
-  if (data.error) throw new Error(data.error);
-
-  throw new Error("Unexpected HF response: " + JSON.stringify(data));
+  if (data.error) throw new Error(data.error.message || data.error);
+  return data.choices?.[0]?.message?.content || "";
 }
 
 export function parseQuestions(raw) {
@@ -125,7 +101,6 @@ export class SupabaseRealtime {
   disconnect() { clearInterval(this.heartbeat); this.ws?.close(); this.ws = null; }
 }
 
-// ─── SHARE ────────────────────────────────────────────────────────────────────
 export function encodeQuiz(questions) {
   try { return btoa(unescape(encodeURIComponent(JSON.stringify(questions)))).replace(/=/g, ""); }
   catch { return null; }
