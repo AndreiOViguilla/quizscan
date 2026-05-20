@@ -77,7 +77,7 @@ export function BackButton({ to = "home", label = "Back" }) {
   const { navigate } = useApp();
   return (
     <button className="back-btn" onClick={() => navigate(to)}>
-      <- {label}
+      &larr; {label}
     </button>
   );
 }
