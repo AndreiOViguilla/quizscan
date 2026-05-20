@@ -428,12 +428,12 @@ export default function HomePage() {
           {ytStatus && (
             <div style={{
               marginTop: 10, padding: "14px 16px",
-              background: "#000", border: "2px solid #2e7d32",
+              background: "var(--mp-head)", border: "1px solid var(--mp-bdr)",
               borderRadius: 4, fontFamily: "'Space Mono', monospace",
               fontSize: 12, lineHeight: 2, wordBreak: "break-all",
               maxHeight: 300, overflowY: "auto"
             }}>
-              <div style={{ color: "#4caf50", marginBottom: 8, fontWeight: 700, fontSize: 13 }}>
+              <div style={{ color: "var(--mp-txt)", marginBottom: 8, fontWeight: 600, fontSize: 13 }}>
                 YouTube Status Log
               </div>
               {ytStatus.split("\n").map((line, i) => {
@@ -441,8 +441,8 @@ export default function HomePage() {
                 const isSuccess = /got transcript|title found|desc found|chars|200/i.test(line);
                 return (
                   <div key={i} style={{
-                    color: isError ? "#ff5252" : isSuccess ? "#4caf50" : "#81c784",
-                    paddingLeft: 8, borderLeft: `2px solid ${isError ? "#ff5252" : isSuccess ? "#4caf50" : "#1a3d1a"}`
+                    color: isError ? "#ef4444" : isSuccess ? "var(--mp-txt)" : "var(--mp-dim)",
+                    paddingLeft: 8, borderLeft: `1px solid ${isError ? "#ef4444" : "var(--mp-bdr)"}`
                     , marginBottom: 4
                   }}>
                     {isError ? "✗" : isSuccess ? "✓" : "›"} {line}
@@ -518,17 +518,17 @@ export default function HomePage() {
 
         {/* Multiplayer panel */}
         <div style={{
-          background: "var(--bg2,#040f04)", border: "1px solid #2e7d32",
+          background: "var(--mp-bg)", border: "1px solid var(--mp-bdr)",
           borderRadius: 8, overflow: "hidden", marginBottom: 16
         }}>
           <div style={{
-            background: "#0d2b0d", padding: "14px 20px",
+            background: "var(--mp-head)", padding: "14px 20px",
             fontFamily: "'Space Mono',monospace", fontSize: 13,
-            fontWeight: 700, color: "#4caf50", letterSpacing: 1,
-            borderBottom: "1px solid #1a3d1a"
+            fontWeight: 700, color: "var(--mp-txt)", letterSpacing: 0,
+            borderBottom: "1px solid var(--mp-bdr)"
           }}>
             MULTIPLAYER
-            <div style={{ fontSize: 10, color: "#2e7d32", fontWeight: 400, marginTop: 2, letterSpacing: 0 }}>
+            <div style={{ fontSize: 11, color: "var(--mp-dim)", fontWeight: 400, marginTop: 2, letterSpacing: 0 }}>
               Supabase — works across devices globally
             </div>
           </div>
@@ -538,7 +538,7 @@ export default function HomePage() {
             <div>
               <label className="field-label">Host a game</label>
               {ctx.questions.length > 0 ? (
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 11, color: "#4caf50", marginBottom: 10, padding: "6px 10px", background: "#0d2b0d", borderRadius: 3, border: "1px solid #2e7d32" }}>
+                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 11, color: "var(--mp-dim)", marginBottom: 10, padding: "6px 10px", background: "var(--mp-head)", borderRadius: 6, border: "1px solid var(--mp-bdr)" }}>
                   + {ctx.questions.length} questions ready
                 </div>
               ) : (
@@ -556,7 +556,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            <div style={{ borderTop: "1px solid #1a3d1a", paddingTop: 16 }}>
+            <div style={{ borderTop: "1px solid var(--mp-bdr)", paddingTop: 16 }}>
               <label className="field-label">Join a game</label>
               <p style={{ fontSize: 12, color: "#555", fontFamily: "'Space Mono',monospace", marginBottom: 10, lineHeight: 1.6 }}>
                 Enter the 4-letter room code from your host.
@@ -573,18 +573,18 @@ export default function HomePage() {
 
         {/* Manual creator panel */}
         <div style={{
-          background: "var(--bg2,#040f04)", border: "1px solid #1a3d1a",
+          background: "var(--mp-bg)", border: "1px solid var(--mp-bdr)",
           borderRadius: 8, overflow: "hidden"
         }}>
           <div style={{
-            background: "#0d2b0d", padding: "14px 20px",
+            background: "var(--mp-head)", padding: "14px 20px",
             fontFamily: "'Space Mono',monospace", fontSize: 13,
-            fontWeight: 700, color: "#4caf50", letterSpacing: 1,
-            borderBottom: "1px solid #1a3d1a", cursor: "pointer",
+            fontWeight: 700, color: "var(--mp-txt)", letterSpacing: 0,
+            borderBottom: "1px solid var(--mp-bdr)", cursor: "pointer",
             display: "flex", justifyContent: "space-between"
           }} onClick={() => setShowManual(m => !m)}>
             MANUAL QUESTIONS
-            <span style={{ color: "#2e7d32" }}>{showManual ? "^" : "v"}</span>
+            <span style={{ color: "var(--mp-dim)" }}>{showManual ? "^" : "v"}</span>
           </div>
           {showManual && (
             <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -601,7 +601,7 @@ export default function HomePage() {
                 <div key={i} className="card-sm" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{mq.question}</div>
-                    <div style={{ fontSize: 11, color: "#4caf50", fontFamily: "'Space Mono',monospace", marginTop: 3 }}>→ {mq.answer}</div>
+                    <div style={{ fontSize: 11, color: "var(--mp-dim)", marginTop: 3 }}>→ {mq.answer}</div>
                   </div>
                   <button style={{ background: "transparent", border: "none", color: "#c62828", cursor: "pointer", fontSize: 16 }}
                     onClick={() => setManualList(l => l.filter((_, j) => j !== i))}>x</button>
