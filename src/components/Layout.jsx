@@ -11,7 +11,7 @@ export function Confetti({ active }) {
     const pieces = Array.from({ length: 120 }, () => ({
       x: Math.random() * canvas.width, y: Math.random() * -200,
       r: Math.random() * 8 + 4, tilt: Math.random() * 10 - 10, speed: Math.random() * 3 + 1,
-      color: ["#10a37f", "#6ee7b7", "#a7f3d0", "#fff", "#d1fae5"][Math.floor(Math.random() * 5)]
+      color: ["#888", "#aaa", "#ccc", "#fff", "#666"][Math.floor(Math.random() * 5)]
     }));
     let frame;
     const draw = () => {
@@ -34,32 +34,26 @@ export function Confetti({ active }) {
 
 export function Header() {
   const { navigate, page, dark, setDark } = useApp();
-
   const NAV = [
     { label: "Home", to: "home" },
     { label: "Board", to: "leaderboard" },
     { label: "History", to: "history" },
   ];
-
   return (
-    <header className="header">
-      <div className="header-logo" onClick={() => navigate("home")}>
-        <div className="logo-icon">Q</div>
-        Quiz<span>Scan</span>
-      </div>
-      <div className="hf-badge">🤗 Hugging Face</div>
-      <nav className="header-nav">
+    <div className="topbar">
+      <div className="topbar-logo" onClick={() => navigate("home")}>QuizScan</div>
+      <div className="topbar-right">
         {NAV.map(n => (
-          <button key={n.to} className={`nav-btn ${page === n.to ? "active" : ""}`} onClick={() => navigate(n.to)}>
+          <button key={n.to} className={`topbar-btn ${page === n.to ? "active" : ""}`} onClick={() => navigate(n.to)}>
             {n.label}
           </button>
         ))}
-        <div className="nav-divider" />
-        <button className="nav-btn" onClick={() => setDark(d => !d)}>
-          {dark ? "☀️ Light" : "🌙 Dark"}
+        <div className="topbar-divider" />
+        <button className="topbar-btn" onClick={() => setDark(d => !d)}>
+          {dark ? "Light" : "Dark"}
         </button>
-      </nav>
-    </header>
+      </div>
+    </div>
   );
 }
 
@@ -68,7 +62,7 @@ export function Footer() {
   return (
     <footer className="footer">
       <div className="footer-left">
-        <span>QuizScan</span> — AI-powered quiz generator · Powered by 🤗 Hugging Face
+        <span>QuizScan</span> — AI quiz generator
       </div>
       <div className="footer-right">
         <span className="footer-link" onClick={() => navigate("home")}>Home</span>
@@ -83,7 +77,7 @@ export function BackButton({ to = "home", label = "Back" }) {
   const { navigate } = useApp();
   return (
     <button className="back-btn" onClick={() => navigate(to)}>
-      ← {label}
+      <- {label}
     </button>
   );
 }

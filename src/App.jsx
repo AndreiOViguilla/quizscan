@@ -14,7 +14,6 @@ import MultiplayerPage from "./pages/MultiplayerPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
 import HistoryPage from "./pages/HistoryPage";
 
-// ─── Router ────────────────────────────────────────────────────────────────────
 function Router() {
   const { page } = useApp();
   switch (page) {
@@ -32,18 +31,15 @@ function Router() {
   }
 }
 
-// ─── Inner App (has access to context) ────────────────────────────────────────
 function InnerApp() {
   const { dark, confetti, page } = useApp();
 
-  // Inject global styles
   useEffect(() => {
     let el = document.getElementById("qs-global-styles");
     if (!el) { el = document.createElement("style"); el.id = "qs-global-styles"; document.head.appendChild(el); }
     el.textContent = makeGlobalStyles(dark);
   }, [dark]);
 
-  // Expose CSS variables to styled elements via data attr
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
   }, [dark]);
@@ -51,7 +47,7 @@ function InnerApp() {
   const showFooter = !["quiz", "loading"].includes(page);
 
   return (
-    <div className="app">
+    <div className="app" style={{ paddingTop: "57px" }}>
       <Confetti active={confetti} />
       <Header />
       <Router />
@@ -60,7 +56,6 @@ function InnerApp() {
   );
 }
 
-// ─── Root ──────────────────────────────────────────────────────────────────────
 export default function App() {
   return (
     <AppProvider>
