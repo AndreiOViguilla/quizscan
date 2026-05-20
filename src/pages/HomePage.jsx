@@ -126,17 +126,17 @@ export default function HomePage() {
       const langNote = lang !== "English" ? `All questions and answers must be in ${lang}.` : "";
       const jsonInstr = `Respond ONLY with a valid JSON array. No markdown, no backticks.\nEach item: {"type":"mcq"|"tf"|"fill","question":string,"choices":[4 strings mcq only],"answer":0-3 for mcq|"True"/"False" for tf|string for fill,"explanation":string}`;
 
-      let messages, model = "mixtral";
+      let messages, model = "llama-3.3-70b-versatile";
 
       if (tab === "image" && file) {
-        model = "mixtral-vision";
+        model = "meta-llama/llama-4-scout-17b-16e-instruct";
         const b64 = (await readB64(file)).split(",")[1];
         messages = [{ role: "user", content: [
           { type: "image_url", image_url: { url: `data:${file.type || "image/jpeg"};base64,${b64}` } },
           { type: "text", text: `Quiz generator. Read ALL text in image. Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}` }
         ]}];
       } else if (tab === "pdf" && file) {
-        model = "mixtral-vision";
+        model = "meta-llama/llama-4-scout-17b-16e-instruct";
         const imgs = await pdfToImages(file);
         const blocks = imgs.map(b => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b}` } }));
         blocks.push({ type: "text", text: `Quiz generator. Read ALL text in PDF. Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}` });
@@ -426,14 +426,11 @@ export default function HomePage() {
             <strong>Note:</strong> Transcript fetching requires deployment to Vercel. Running locally? Use the <strong>Topic</strong> tab instead.
           </div>
           {ytStatus && (
-            <div style={{
-              marginTop: 10, padding: "14px 16px",
-              background: "var(--mp-head)", border: "1px solid var(--mp-bdr)",
-              borderRadius: 4, fontFamily: "'Space Mono', monospace",
-              fontSize: 12, lineHeight: 2, wordBreak: "break-all",
-              maxHeight: 300, overflowY: "auto"
+            <div className="card" style={{
+              marginTop: 10, fontSize: 12, lineHeight: 2,
+              wordBreak: "break-all", maxHeight: 300, overflowY: "auto"
             }}>
-              <div style={{ color: "var(--mp-txt)", marginBottom: 8, fontWeight: 600, fontSize: 13 }}>
+              <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8, opacity: 0.6 }}>
                 YouTube Status Log
               </div>
               {ytStatus.split("\n").map((line, i) => {
@@ -441,11 +438,11 @@ export default function HomePage() {
                 const isSuccess = /got transcript|title found|desc found|chars|200/i.test(line);
                 return (
                   <div key={i} style={{
-                    color: isError ? "#ef4444" : isSuccess ? "var(--mp-txt)" : "var(--mp-dim)",
-                    paddingLeft: 8, borderLeft: `1px solid ${isError ? "#ef4444" : "var(--mp-bdr)"}`
-                    , marginBottom: 4
+                    color: isError ? "#ef4444" : "inherit",
+                    opacity: isSuccess ? 1 : 0.7,
+                    paddingLeft: 8, marginBottom: 4
                   }}>
-                    {isError ? "✗" : isSuccess ? "✓" : "›"} {line}
+                    {isError ? "x" : isSuccess ? "+" : ">"} {line}
                   </div>
                 );
               })}
@@ -517,32 +514,27 @@ export default function HomePage() {
       <div style={{ flex: 1, minWidth: 280, position: "sticky", top: 80 }}>
 
         {/* Multiplayer panel */}
-        <div style={{
-          background: "var(--mp-bg)", border: "1px solid var(--mp-bdr)",
-          borderRadius: 8, overflow: "hidden", marginBottom: 16
-        }}>
+        <div className="card" style={{ marginBottom: 16, padding: 0, overflow: "hidden" }}>
           <div style={{
-            background: "var(--mp-head)", padding: "14px 20px",
-            fontFamily: "'Space Mono',monospace", fontSize: 13,
-            fontWeight: 700, color: "var(--mp-txt)", letterSpacing: 0,
-            borderBottom: "1px solid var(--mp-bdr)"
+            padding: "14px 20px", fontSize: 13,
+            fontWeight: 700, borderBottom: "1px solid var(--bdr,#3e3e3e)"
           }}>
-            MULTIPLAYER
-            <div style={{ fontSize: 11, color: "var(--mp-dim)", fontWeight: 400, marginTop: 2, letterSpacing: 0 }}>
-              Supabase — works across devices globally
+            Multiplayer
+            <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2, opacity: 0.5 }}>
+              Works across devices globally
             </div>
           </div>
-          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
             {ctx.mpError && <div className="alert-error">! {ctx.mpError}</div>}
 
             <div>
               <label className="field-label">Host a game</label>
               {ctx.questions.length > 0 ? (
-                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 11, color: "var(--mp-dim)", marginBottom: 10, padding: "6px 10px", background: "var(--mp-head)", borderRadius: 6, border: "1px solid var(--mp-bdr)" }}>
-                  + {ctx.questions.length} questions ready
+                <div className="badge" style={{ marginBottom: 10 }}>
+                  {ctx.questions.length} questions ready
                 </div>
               ) : (
-                <p style={{ fontSize: 12, color: "#555", fontFamily: "'Space Mono',monospace", marginBottom: 10, lineHeight: 1.6 }}>
+                <p style={{ fontSize: 12, opacity: 0.5, marginBottom: 10, lineHeight: 1.6 }}>
                   Generate a quiz first, then create a room.
                 </p>
               )}
@@ -556,9 +548,9 @@ export default function HomePage() {
               </button>
             </div>
 
-            <div style={{ borderTop: "1px solid var(--mp-bdr)", paddingTop: 16 }}>
+            <div style={{ borderTop: "1px solid var(--bdr,#3e3e3e)", paddingTop: 16 }}>
               <label className="field-label">Join a game</label>
-              <p style={{ fontSize: 12, color: "#555", fontFamily: "'Space Mono',monospace", marginBottom: 10, lineHeight: 1.6 }}>
+              <p style={{ fontSize: 12, opacity: 0.5, marginBottom: 10, lineHeight: 1.6 }}>
                 Enter the 4-letter room code from your host.
               </p>
               <div style={{ display: "flex", gap: 8 }}>
@@ -572,22 +564,17 @@ export default function HomePage() {
         </div>
 
         {/* Manual creator panel */}
-        <div style={{
-          background: "var(--mp-bg)", border: "1px solid var(--mp-bdr)",
-          borderRadius: 8, overflow: "hidden"
-        }}>
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <div style={{
-            background: "var(--mp-head)", padding: "14px 20px",
-            fontFamily: "'Space Mono',monospace", fontSize: 13,
-            fontWeight: 700, color: "var(--mp-txt)", letterSpacing: 0,
-            borderBottom: "1px solid var(--mp-bdr)", cursor: "pointer",
-            display: "flex", justifyContent: "space-between"
+            padding: "14px 20px", fontSize: 13,
+            fontWeight: 700, borderBottom: showManual ? "1px solid var(--bdr,#3e3e3e)" : "none",
+            cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
           }} onClick={() => setShowManual(m => !m)}>
-            MANUAL QUESTIONS
-            <span style={{ color: "var(--mp-dim)" }}>{showManual ? "^" : "v"}</span>
+            Manual Questions
+            <span style={{ opacity: 0.4, fontSize: 11 }}>{showManual ? "▲" : "▼"}</span>
           </div>
           {showManual && (
-            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
               <input className="field-input" placeholder="Question" value={manualQ} onChange={e => setManualQ(e.target.value)} />
               <div style={{ display: "flex", gap: 8 }}>
                 <input className="field-input" placeholder="Answer" value={manualA} onChange={e => setManualA(e.target.value)} />
@@ -601,9 +588,9 @@ export default function HomePage() {
                 <div key={i} className="card-sm" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{mq.question}</div>
-                    <div style={{ fontSize: 11, color: "var(--mp-dim)", marginTop: 3 }}>→ {mq.answer}</div>
+                    <div style={{ fontSize: 11, opacity: 0.6, marginTop: 3 }}>{mq.answer}</div>
                   </div>
-                  <button style={{ background: "transparent", border: "none", color: "#c62828", cursor: "pointer", fontSize: 16 }}
+                  <button style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16, opacity: 0.7 }}
                     onClick={() => setManualList(l => l.filter((_, j) => j !== i))}>x</button>
                 </div>
               ))}

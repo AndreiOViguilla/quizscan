@@ -13,21 +13,8 @@ export function makeGlobalStyles(dark) {
   return `
     @import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    --mp-bg: ${dark ? "#2a2a2a" : "#f5f5f5"};
-    --mp-head: ${dark ? "#333" : "#ebebeb"};
-    --mp-bdr: ${dark ? "#444" : "#e0e0e0"};
-    --mp-txt: ${dark ? "#ccc" : "#333"};
-    --mp-dim: ${dark ? "#888" : "#888"};
-    }
     body { background: ${v.bg}; color: ${v.txt}; font-family: 'Instrument Sans', system-ui, sans-serif; transition: background .2s, color .2s; }
     a { color: ${v.txt2}; text-decoration: none; }
-    :root {
-      --mp-bg: \${dark ? "#2a2a2a" : "#f5f5f5"};
-      --mp-head: \${dark ? "#333333" : "#ebebeb"};
-      --mp-bdr: \${dark ? "#444444" : "#e0e0e0"};
-      --mp-txt: \${dark ? "#cccccc" : "#333333"};
-      --mp-dim: \${dark ? "#888888" : "#888888"};
-    }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
     @keyframes bar-fill { 0%{width:0%} 100%{width:100%} }
     @keyframes slide-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
