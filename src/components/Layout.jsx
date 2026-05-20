@@ -11,7 +11,7 @@ export function Confetti({ active }) {
     const pieces = Array.from({ length: 120 }, () => ({
       x: Math.random() * canvas.width, y: Math.random() * -200,
       r: Math.random() * 8 + 4, tilt: Math.random() * 10 - 10, speed: Math.random() * 3 + 1,
-      color: ["#4caf50", "#81c784", "#a5d6a7", "#fff", "#c8e6c9"][Math.floor(Math.random() * 5)]
+      color: ["#10a37f", "#6ee7b7", "#a7f3d0", "#fff", "#d1fae5"][Math.floor(Math.random() * 5)]
     }));
     let frame;
     const draw = () => {
@@ -36,17 +36,18 @@ export function Header() {
   const { navigate, page, dark, setDark } = useApp();
 
   const NAV = [
-    { label: "HOME", to: "home" },
-    { label: "BOARD", to: "leaderboard" },
-    { label: "HISTORY", to: "history" },
+    { label: "Home", to: "home" },
+    { label: "Board", to: "leaderboard" },
+    { label: "History", to: "history" },
   ];
 
   return (
     <header className="header">
       <div className="header-logo" onClick={() => navigate("home")}>
+        <div className="logo-icon">Q</div>
         Quiz<span>Scan</span>
       </div>
-      <div className="header-badge">AI</div>
+      <div className="hf-badge">🤗 Hugging Face</div>
       <nav className="header-nav">
         {NAV.map(n => (
           <button key={n.to} className={`nav-btn ${page === n.to ? "active" : ""}`} onClick={() => navigate(n.to)}>
@@ -55,7 +56,7 @@ export function Header() {
         ))}
         <div className="nav-divider" />
         <button className="nav-btn" onClick={() => setDark(d => !d)}>
-          {dark ? "LIGHT" : "DARK"}
+          {dark ? "☀️ Light" : "🌙 Dark"}
         </button>
       </nav>
     </header>
@@ -67,7 +68,7 @@ export function Footer() {
   return (
     <footer className="footer">
       <div className="footer-left">
-        <span>QuizScan</span> — AI-powered quiz generator
+        <span>QuizScan</span> — AI-powered quiz generator · Powered by 🤗 Hugging Face
       </div>
       <div className="footer-right">
         <span className="footer-link" onClick={() => navigate("home")}>Home</span>

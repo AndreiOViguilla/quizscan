@@ -1,15 +1,64 @@
-import { GROQ_KEY, SUPABASE_URL, SUPABASE_KEY } from "./constants";
+import { HF_KEY, SUPABASE_URL, SUPABASE_KEY } from "./constants";
 
-// ─── GROQ ─────────────────────────────────────────────────────────────────────
-export async function groq(messages, model = "llama-3.3-70b-versatile", maxTokens = 8000) {
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+// ─── HUGGING FACE ─────────────────────────────────────────────────────────────
+// Uses Hugging Face Inference API with a capable open model
+const HF_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1";
+const HF_URL = `https://api-inference.huggingface.co/models/${HF_MODEL}`;
+
+export async function groq(messages, _model, maxTokens = 4096) {
+  // Convert OpenAI-style messages to a single prompt string (Mixtral instruct format)
+  const prompt = messages.map(m => {
+    if (m.role === "system") return `[INST] <<SYS>>\n${m.content}\n<</SYS>>\n\n`;
+    if (m.role === "user") {
+      // Handle vision content arrays (image + text)
+      if (Array.isArray(m.content)) {
+        const textPart = m.content.find(c => c.type === "text");
+        return `[INST] ${textPart?.text || ""} [/INST]`;
+      }
+      return `[INST] ${m.content} [/INST]`;
+    }
+    if (m.role === "assistant") return m.content;
+    return "";
+  }).join("\n");
+
+  const res = await fetch(HF_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_KEY}` },
-    body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${HF_KEY}`,
+    },
+    body: JSON.stringify({
+      inputs: prompt,
+      parameters: {
+        max_new_tokens: maxTokens,
+        temperature: 0.7,
+        top_p: 0.95,
+        do_sample: true,
+        return_full_text: false,
+      },
+    }),
   });
+
+  if (!res.ok) {
+    const err = await res.text();
+    // Model loading — retry after delay
+    if (res.status === 503) {
+      await new Promise(r => setTimeout(r, 8000));
+      return groq(messages, _model, maxTokens);
+    }
+    throw new Error(`HF API error ${res.status}: ${err}`);
+  }
+
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message);
-  return data.choices?.[0]?.message?.content || "";
+
+  // HF returns array of { generated_text }
+  if (Array.isArray(data) && data[0]?.generated_text !== undefined) {
+    return data[0].generated_text;
+  }
+  if (data.generated_text) return data.generated_text;
+  if (data.error) throw new Error(data.error);
+
+  throw new Error("Unexpected HF response: " + JSON.stringify(data));
 }
 
 export function parseQuestions(raw) {

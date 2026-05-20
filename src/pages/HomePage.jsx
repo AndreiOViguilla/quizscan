@@ -126,17 +126,17 @@ export default function HomePage() {
       const langNote = lang !== "English" ? `All questions and answers must be in ${lang}.` : "";
       const jsonInstr = `Respond ONLY with a valid JSON array. No markdown, no backticks.\nEach item: {"type":"mcq"|"tf"|"fill","question":string,"choices":[4 strings mcq only],"answer":0-3 for mcq|"True"/"False" for tf|string for fill,"explanation":string}`;
 
-      let messages, model = "llama-3.3-70b-versatile";
+      let messages, model = "mixtral";
 
       if (tab === "image" && file) {
-        model = "meta-llama/llama-4-scout-17b-16e-instruct";
+        model = "mixtral-vision";
         const b64 = (await readB64(file)).split(",")[1];
         messages = [{ role: "user", content: [
           { type: "image_url", image_url: { url: `data:${file.type || "image/jpeg"};base64,${b64}` } },
           { type: "text", text: `Quiz generator. Read ALL text in image. Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}` }
         ]}];
       } else if (tab === "pdf" && file) {
-        model = "meta-llama/llama-4-scout-17b-16e-instruct";
+        model = "mixtral-vision";
         const imgs = await pdfToImages(file);
         const blocks = imgs.map(b => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b}` } }));
         blocks.push({ type: "text", text: `Quiz generator. Read ALL text in PDF. Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}` });
