@@ -362,22 +362,18 @@ export default function HomePage() {
   const genDisabled = ["pdf", "image"].includes(ctx.tab) && !ctx.file;
 
   return (
-    <div className="page" style={{ maxWidth: 1200 }}>
-      <div className="home-hero">
-        <h1 className="home-title">Turn any content<br />into a <span className="green">quiz.</span></h1>
-        <p className="home-sub">// PDF · image · text · URL · YouTube · topic → instant quiz</p>
-      </div>
+    <div className="page" style={{ maxWidth: 680 }}>
 
-      {/* Two column layout */}
-      <div style={{ display: "flex", gap: 32, alignItems: "flex-start" }}>
-      {/* LEFT COLUMN — Quiz stuff */}
-      <div style={{ flex: 2, minWidth: 0 }}>
+      {/* Hero */}
+      <div className="home-hero">
+        <h1 className="home-title">Turn any content<br />into a quiz.</h1>
+        <p className="home-sub">PDF · image · text · URL · YouTube · topic — instant quiz</p>
+      </div>
 
       {/* Mode selector */}
       <div className="home-modes">
         {MODES.map(m => (
           <div key={m.id} className={`mode-card ${ctx.mode === m.id ? "active" : ""}`} onClick={() => ctx.setMode(m.id)}>
-            <div className="mode-card-icon">[{m.label[0]}]</div>
             <div className="mode-card-title">{m.label}</div>
             <div className="mode-card-desc">{m.desc}</div>
           </div>
@@ -385,7 +381,7 @@ export default function HomePage() {
       </div>
 
       {/* Input tabs */}
-      <div className="tabs" style={{ marginBottom: 20 }}>
+      <div className="tabs" style={{ marginBottom: 16 }}>
         {TABS.map(([t, label]) => (
           <button key={t} className={`tab-btn ${ctx.tab === t ? "active" : ""}`}
             onClick={() => { ctx.setTab(t); ctx.setFile(null); }}>
@@ -394,6 +390,7 @@ export default function HomePage() {
         ))}
       </div>
 
+      {/* Input area */}
       {(ctx.tab === "pdf" || ctx.tab === "image") && (
         <div className={`drop-zone ${drag ? "drag-over" : ""}`}
           onDragOver={e => { e.preventDefault(); setDrag(true); }}
@@ -402,7 +399,7 @@ export default function HomePage() {
           <input type="file" accept={ctx.tab === "pdf" ? ".pdf" : "image/*"} onChange={e => e.target.files[0] && ctx.setFile(e.target.files[0])} />
           <div className="drop-label">Drop your {ctx.tab === "pdf" ? "PDF" : "image"} here</div>
           <div className="drop-hint">or click to browse</div>
-          {ctx.file && <div className="drop-file-name">+ {ctx.file.name}</div>}
+          {ctx.file && <div className="drop-file-name">{ctx.file.name}</div>}
         </div>
       )}
       {ctx.tab === "text" && (
@@ -410,58 +407,22 @@ export default function HomePage() {
           value={ctx.text} onChange={e => ctx.setText(e.target.value)} />
       )}
       {ctx.tab === "url" && (
-        <div>
-          <input className="field-input" placeholder="https://example.com/article"
-            value={ctx.urlVal} onChange={e => ctx.setUrlVal(e.target.value)} />
-          <div className="alert-info" style={{ marginTop: 10 }}>Paste any article or Wikipedia page URL. The AI reads the content and generates questions.</div>
-        </div>
+        <input className="field-input" placeholder="https://example.com/article"
+          value={ctx.urlVal} onChange={e => ctx.setUrlVal(e.target.value)} />
       )}
       {ctx.tab === "youtube" && (
-        <div>
-          <input className="field-input" placeholder="https://youtube.com/watch?v=..."
-            value={ctx.ytVal} onChange={e => { ctx.setYtVal(e.target.value); setYtStatus(""); }} />
-          <div className="alert-info" style={{ marginTop: 10 }}>
-            Paste a YouTube video URL. The app fetches the real transcript and generates questions from what was actually said.
-            <br /><br />
-            <strong>Note:</strong> Transcript fetching requires deployment to Vercel. Running locally? Use the <strong>Topic</strong> tab instead.
-          </div>
-          {ytStatus && (
-            <div className="card" style={{
-              marginTop: 10, fontSize: 12, lineHeight: 2,
-              wordBreak: "break-all", maxHeight: 300, overflowY: "auto"
-            }}>
-              <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8, opacity: 0.6 }}>
-                YouTube Status Log
-              </div>
-              {ytStatus.split("\n").map((line, i) => {
-                const isError = /error|fail|exception|blocked|403|500/i.test(line);
-                const isSuccess = /got transcript|title found|desc found|chars|200/i.test(line);
-                return (
-                  <div key={i} style={{
-                    color: isError ? "#ef4444" : "inherit",
-                    opacity: isSuccess ? 1 : 0.7,
-                    paddingLeft: 8, marginBottom: 4
-                  }}>
-                    {isError ? "x" : isSuccess ? "+" : ">"} {line}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <input className="field-input" placeholder="https://youtube.com/watch?v=..."
+          value={ctx.ytVal} onChange={e => { ctx.setYtVal(e.target.value); setYtStatus(""); }} />
       )}
       {ctx.tab === "topic" && (
-        <div>
-          <input className="field-input" style={{ fontSize: 16, fontWeight: 600, padding: "14px 16px" }}
-            placeholder="e.g. World War 2, Photosynthesis, Python basics..."
-            value={ctx.topicVal} onChange={e => ctx.setTopicVal(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && generate()} />
-          <div className="alert-info" style={{ marginTop: 10 }}>Type any topic — AI generates a quiz from its knowledge, no file needed.</div>
-        </div>
+        <input className="field-input" style={{ fontSize: 15, padding: "13px 16px" }}
+          placeholder="e.g. World War 2, Photosynthesis, Python basics..."
+          value={ctx.topicVal} onChange={e => ctx.setTopicVal(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && generate()} />
       )}
 
-      {/* Options */}
-      <div className="input-row">
+      {/* Options row */}
+      <div className="input-row" style={{ marginTop: 16 }}>
         <div>
           <label className="field-label">Questions</label>
           <select className="field-select" value={ctx.numQ} onChange={e => ctx.setNumQ(Number(e.target.value))}>
@@ -487,11 +448,12 @@ export default function HomePage() {
         </div>
         <div>
           <label className="field-label">Your Name</label>
-          <input className="field-input" style={{ width: 160 }} placeholder="e.g. Alex"
+          <input className="field-input" style={{ width: 140 }} placeholder="e.g. Alex"
             value={ctx.playerName} onChange={e => ctx.setPlayerName(e.target.value)} />
         </div>
       </div>
 
+      {/* Toggles */}
       {ctx.mode === "quiz" && (
         <div className="toggles-row">
           <Toggle on={ctx.useTimer} onChange={ctx.setUseTimer} label="Timer (30s)" />
@@ -502,109 +464,86 @@ export default function HomePage() {
         </div>
       )}
 
-      {ctx.error && <div className="alert-error">! {ctx.error}</div>}
+      {ctx.error && <div className="alert-error" style={{ marginTop: 16 }}>{ctx.error}</div>}
 
-      <button className="btn-primary" style={{ marginTop: 28 }} onClick={generate} disabled={genDisabled}>
-        Generate {ctx.mode === "study" ? "Study Guide" : ctx.mode === "flashcard" ? "Flashcards" : "Quiz"} →
+      {/* Generate button */}
+      <button className="btn-primary" style={{ marginTop: 24, width: "100%", padding: "14px" }} onClick={generate} disabled={genDisabled}>
+        Generate {ctx.mode === "study" ? "Study Guide" : ctx.mode === "flashcard" ? "Flashcards" : "Quiz"}
       </button>
 
-      </div> {/* end left column */}
+      <hr className="section-divider" />
 
-      {/* RIGHT COLUMN — Multiplayer + Manual */}
-      <div style={{ flex: 1, minWidth: 280, position: "sticky", top: 80 }}>
+      {/* Multiplayer */}
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Multiplayer</div>
+        <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 16 }}>Play with others across devices using a room code</div>
 
-        {/* Multiplayer panel */}
-        <div className="card" style={{ marginBottom: 16, padding: 0, overflow: "hidden" }}>
-          <div style={{
-            padding: "14px 20px", fontSize: 13,
-            fontWeight: 700, borderBottom: "1px solid var(--bdr,#3e3e3e)"
-          }}>
-            Multiplayer
-            <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2, opacity: 0.5 }}>
-              Works across devices globally
+        {ctx.mpError && <div className="alert-error" style={{ marginBottom: 12 }}>{ctx.mpError}</div>}
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <label className="field-label">Host a game</label>
+            <button
+              className="btn-secondary"
+              style={{ width: "100%", opacity: ctx.questions.length > 0 ? 1 : 0.4 }}
+              onClick={ctx.questions.length > 0 ? hostGame : () => ctx.setError("Generate a quiz first.")}
+              disabled={ctx.questions.length === 0}
+            >
+              {ctx.questions.length > 0 ? `Create Room (${ctx.questions.length} questions)` : "Generate a quiz first"}
+            </button>
+          </div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <label className="field-label">Join a game</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input className="field-input" placeholder="CODE" maxLength={4}
+                value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
+                style={{ letterSpacing: 4, fontWeight: 700, textAlign: "center" }} />
+              <button className="btn-primary" onClick={joinGame}>Join</button>
             </div>
           </div>
-          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-            {ctx.mpError && <div className="alert-error">! {ctx.mpError}</div>}
+        </div>
+      </div>
 
-            <div>
-              <label className="field-label">Host a game</label>
-              {ctx.questions.length > 0 ? (
-                <div className="badge" style={{ marginBottom: 10 }}>
-                  {ctx.questions.length} questions ready
+      {/* Manual Questions */}
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <div style={{
+          padding: "14px 20px", fontSize: 14, fontWeight: 700,
+          borderBottom: showManual ? "1px solid var(--bdr,#3e3e3e)" : "none",
+          cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
+        }} onClick={() => setShowManual(m => !m)}>
+          Manual Questions
+          <span style={{ opacity: 0.4, fontSize: 12 }}>{showManual ? "▲" : "▼"}</span>
+        </div>
+        {showManual && (
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <input className="field-input" placeholder="Question" value={manualQ} onChange={e => setManualQ(e.target.value)} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <input className="field-input" placeholder="Answer" value={manualA} onChange={e => setManualA(e.target.value)} />
+              <button className="btn-secondary" style={{ whiteSpace: "nowrap" }} onClick={() => {
+                if (!manualQ.trim() || !manualA.trim()) return;
+                setManualList(l => [...l, { type: "fill", question: manualQ.trim(), answer: manualA.trim(), explanation: "" }]);
+                setManualQ(""); setManualA("");
+              }}>Add</button>
+            </div>
+            {manualList.map((mq, i) => (
+              <div key={i} className="card-sm" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{mq.question}</div>
+                  <div style={{ fontSize: 11, opacity: 0.5, marginTop: 3 }}>{mq.answer}</div>
                 </div>
-              ) : (
-                <p style={{ fontSize: 12, opacity: 0.5, marginBottom: 10, lineHeight: 1.6 }}>
-                  Generate a quiz first, then create a room.
-                </p>
-              )}
-              <button
-                className={ctx.questions.length > 0 ? "btn-primary" : "btn-secondary"}
-                style={{ width: "100%", opacity: ctx.questions.length > 0 ? 1 : 0.4, cursor: ctx.questions.length > 0 ? "pointer" : "not-allowed" }}
-                onClick={ctx.questions.length > 0 ? hostGame : () => ctx.setError("Generate a quiz first before creating a room.")}
-                disabled={ctx.questions.length === 0}
-              >
-                {ctx.questions.length > 0 ? "Create Room →" : "Generate quiz first"}
+                <button style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16, opacity: 0.7 }}
+                  onClick={() => setManualList(l => l.filter((_, j) => j !== i))}>x</button>
+              </div>
+            ))}
+            {manualList.length > 0 && (
+              <button className="btn-primary" onClick={() => startQuiz(manualList)}>
+                Start with {manualList.length} question{manualList.length !== 1 ? "s" : ""}
               </button>
-            </div>
-
-            <div style={{ borderTop: "1px solid var(--bdr,#3e3e3e)", paddingTop: 16 }}>
-              <label className="field-label">Join a game</label>
-              <p style={{ fontSize: 12, opacity: 0.5, marginBottom: 10, lineHeight: 1.6 }}>
-                Enter the 4-letter room code from your host.
-              </p>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input className="field-input" placeholder="CODE" maxLength={4}
-                  value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
-                  style={{ letterSpacing: 6, fontWeight: 700, textAlign: "center", fontSize: 18 }} />
-                <button className="btn-secondary" onClick={joinGame}>Join</button>
-              </div>
-            </div>
+            )}
           </div>
-        </div>
+        )}
+      </div>
 
-        {/* Manual creator panel */}
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <div style={{
-            padding: "14px 20px", fontSize: 13,
-            fontWeight: 700, borderBottom: showManual ? "1px solid var(--bdr,#3e3e3e)" : "none",
-            cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
-          }} onClick={() => setShowManual(m => !m)}>
-            Manual Questions
-            <span style={{ opacity: 0.4, fontSize: 11 }}>{showManual ? "▲" : "▼"}</span>
-          </div>
-          {showManual && (
-            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-              <input className="field-input" placeholder="Question" value={manualQ} onChange={e => setManualQ(e.target.value)} />
-              <div style={{ display: "flex", gap: 8 }}>
-                <input className="field-input" placeholder="Answer" value={manualA} onChange={e => setManualA(e.target.value)} />
-                <button className="btn-secondary" style={{ whiteSpace: "nowrap" }} onClick={() => {
-                  if (!manualQ.trim() || !manualA.trim()) return;
-                  setManualList(l => [...l, { type: "fill", question: manualQ.trim(), answer: manualA.trim(), explanation: "" }]);
-                  setManualQ(""); setManualA("");
-                }}>+ Add</button>
-              </div>
-              {manualList.map((mq, i) => (
-                <div key={i} className="card-sm" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{mq.question}</div>
-                    <div style={{ fontSize: 11, opacity: 0.6, marginTop: 3 }}>{mq.answer}</div>
-                  </div>
-                  <button style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16, opacity: 0.7 }}
-                    onClick={() => setManualList(l => l.filter((_, j) => j !== i))}>x</button>
-                </div>
-              ))}
-              {manualList.length > 0 && (
-                <button className="btn-primary" onClick={() => startQuiz(manualList)}>
-                  Start with {manualList.length} question{manualList.length !== 1 ? "s" : ""} →
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-      </div> {/* end right column */}
-      </div> {/* end two column layout */}
     </div>
   );
 }
