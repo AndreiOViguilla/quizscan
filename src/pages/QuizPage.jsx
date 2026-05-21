@@ -144,7 +144,7 @@ export default function QuizPage() {
 
   const q = questions[current] || {};
   const timerPct = (ctx.timeLeft / TIMER_SEC) * 100;
-  const timerColor = ctx.timeLeft > 15 ? "inherit" : ctx.timeLeft > 7 ? "#f59e0b" : "#ef4444";
+  const timerColor = ctx.timeLeft > 15 ? "rgba(255,255,255,0.7)" : ctx.timeLeft > 7 ? "#f59e0b" : "#ef4444";
   const correctCount = Object.values(answers).filter(a => a.correct).length;
 
   return (
