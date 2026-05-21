@@ -144,7 +144,7 @@ export default function QuizPage() {
 
   const q = questions[current] || {};
   const timerPct = (ctx.timeLeft / TIMER_SEC) * 100;
-  const timerColor = ctx.timeLeft > 15 ? "#4caf50" : ctx.timeLeft > 7 ? "#ff9800" : "#f44336";
+  const timerColor = ctx.timeLeft > 15 ? "inherit" : ctx.timeLeft > 7 ? "#f59e0b" : "#ef4444";
   const correctCount = Object.values(answers).filter(a => a.correct).length;
 
   return (
@@ -152,21 +152,21 @@ export default function QuizPage() {
       {/* Header row */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
-          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 11, color: "var(--txt3,#2e7d32)", letterSpacing: 2, textTransform: "uppercase" }}>Question</div>
-          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 28, fontWeight: 800, color: "#4caf50" }}>
+          <div style={{ fontSize: 11, opacity: 0.5, letterSpacing: 1, textTransform: "uppercase" }}>Question</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>
             {String(current + 1).padStart(2, "0")} / {String(questions.length).padStart(2, "0")}
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           {useStreak && streak >= 2 && <div className="badge">{streak}x streak</div>}
           {mpCode && mpPlayers.map(p => (
-            <div key={p.name} className="badge" style={{ color: p.name === myMpName ? "#4caf50" : "#81c784" }}>
+            <div key={p.name} className="badge" style={{ opacity: p.name === myMpName ? 1 : 0.6 }}>
               {p.name.substring(0, 8)} {p.score || 0}
             </div>
           ))}
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 11, color: "var(--txt3,#2e7d32)", letterSpacing: 2, textTransform: "uppercase" }}>Score</div>
-            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 28, fontWeight: 800 }}>{correctCount}</div>
+            <div style={{ fontSize: 11, opacity: 0.5, letterSpacing: 1, textTransform: "uppercase" }}>Score</div>
+            <div style={{ fontSize: 24, fontWeight: 700 }}>{correctCount}</div>
           </div>
         </div>
       </div>
@@ -191,16 +191,16 @@ export default function QuizPage() {
       )}
       {autoDiff && !adaptNotice && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <span style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, letterSpacing: 2, color: "#2e7d32" }}>DIFFICULTY</span>
+          <span style={{ fontSize: 10, letterSpacing: 1, opacity: 0.5, textTransform: "uppercase" }}>Difficulty</span>
           <span style={{
-            padding: "2px 10px", borderRadius: 3, fontSize: 11, fontFamily: "'Space Mono',monospace", fontWeight: 700,
-            background: currentDiffLevel === "easy" ? "#0d2b0d" : currentDiffLevel === "very_hard" ? "#2d0000" : "#1a0000",
-            color: currentDiffLevel === "easy" ? "#4caf50" : currentDiffLevel === "very_hard" ? "#ff1744" : "#f44336",
-            border: `1px solid ${currentDiffLevel === "easy" ? "#4caf50" : currentDiffLevel === "very_hard" ? "#ff1744" : "#f44336"}`
+            padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+            background: "transparent",
+            color: currentDiffLevel === "easy" ? "inherit" : currentDiffLevel === "very_hard" ? "#ef4444" : "#f59e0b",
+            border: `1px solid ${currentDiffLevel === "easy" ? "var(--bdr,#3e3e3e)" : currentDiffLevel === "very_hard" ? "#ef4444" : "#f59e0b"}`
           }}>
             {currentDiffLevel === "easy" ? "EASY" : currentDiffLevel === "hard" ? "HARD" : "VERY DIFFICULT"}
           </span>
-          {q._adapted && <span style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, color: "#555" }}>* ADAPTED</span>}
+          {q._adapted && <span style={{ fontSize: 10, opacity: 0.4 }}>adapted</span>}
         </div>
       )}
 
@@ -208,7 +208,7 @@ export default function QuizPage() {
       <div className="card">
         <div className="q-type-label">
           {q.type === "mcq" ? "* Multiple Choice" : q.type === "tf" ? "* True / False" : "* Fill in the Blank"}
-          {useTimer && <span style={{ float: "right", fontFamily: "'Space Mono',monospace", color: timerColor }}>{ctx.timeLeft}s</span>}
+          {useTimer && <span style={{ float: "right", color: timerColor, fontWeight: 600 }}>{ctx.timeLeft}s</span>}
         </div>
         <div className="question-text">{q.question}</div>
 
