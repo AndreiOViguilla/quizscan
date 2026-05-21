@@ -18,6 +18,7 @@ export default function HomePage() {
   const ctx = useApp();
   const [drag, setDrag] = useState(false);
   const [showManual, setShowManual] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showMp, setShowMp] = useState(false);
   const [manualQ, setManualQ] = useState("");
   const [manualA, setManualA] = useState("");
@@ -362,187 +363,225 @@ export default function HomePage() {
   const genDisabled = ["pdf", "image"].includes(ctx.tab) && !ctx.file;
 
   return (
-    <div className="page" style={{ maxWidth: 680 }}>
+    <div className="page" style={{ maxWidth: 620 }}>
 
-      {/* Hero */}
-      <div className="home-hero">
-        <h1 className="home-title">Turn any content<br />into a quiz.</h1>
-        <p className="home-sub">PDF · image · text · URL · YouTube · topic — instant quiz</p>
-      </div>
-
-      {/* Mode selector */}
-      <div className="home-modes">
-        {MODES.map(m => (
-          <div key={m.id} className={`mode-card ${ctx.mode === m.id ? "active" : ""}`} onClick={() => ctx.setMode(m.id)}>
-            <div className="mode-card-title">{m.label}</div>
-            <div className="mode-card-desc">{m.desc}</div>
+      {!showSettings ? (
+        /* ── PAGE 1: INPUT ── */
+        <>
+          <div className="home-hero">
+            <h1 className="home-title">Turn any content<br />into a quiz.</h1>
+            <p className="home-sub">PDF · image · text · URL · YouTube · topic</p>
           </div>
-        ))}
-      </div>
 
-      {/* Input tabs */}
-      <div className="tabs" style={{ marginBottom: 16 }}>
-        {TABS.map(([t, label]) => (
-          <button key={t} className={`tab-btn ${ctx.tab === t ? "active" : ""}`}
-            onClick={() => { ctx.setTab(t); ctx.setFile(null); }}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Input area */}
-      {(ctx.tab === "pdf" || ctx.tab === "image") && (
-        <div className={`drop-zone ${drag ? "drag-over" : ""}`}
-          onDragOver={e => { e.preventDefault(); setDrag(true); }}
-          onDragLeave={() => setDrag(false)}
-          onDrop={e => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) ctx.setFile(e.dataTransfer.files[0]); }}>
-          <input type="file" accept={ctx.tab === "pdf" ? ".pdf" : "image/*"} onChange={e => e.target.files[0] && ctx.setFile(e.target.files[0])} />
-          <div className="drop-label">Drop your {ctx.tab === "pdf" ? "PDF" : "image"} here</div>
-          <div className="drop-hint">or click to browse</div>
-          {ctx.file && <div className="drop-file-name">{ctx.file.name}</div>}
-        </div>
-      )}
-      {ctx.tab === "text" && (
-        <textarea className="text-area" placeholder="Paste your notes, article, or any text here..."
-          value={ctx.text} onChange={e => ctx.setText(e.target.value)} />
-      )}
-      {ctx.tab === "url" && (
-        <input className="field-input" placeholder="https://example.com/article"
-          value={ctx.urlVal} onChange={e => ctx.setUrlVal(e.target.value)} />
-      )}
-      {ctx.tab === "youtube" && (
-        <input className="field-input" placeholder="https://youtube.com/watch?v=..."
-          value={ctx.ytVal} onChange={e => { ctx.setYtVal(e.target.value); setYtStatus(""); }} />
-      )}
-      {ctx.tab === "topic" && (
-        <input className="field-input" style={{ fontSize: 15, padding: "13px 16px" }}
-          placeholder="e.g. World War 2, Photosynthesis, Python basics..."
-          value={ctx.topicVal} onChange={e => ctx.setTopicVal(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && generate()} />
-      )}
-
-      {/* Options row */}
-      <div className="input-row" style={{ marginTop: 16 }}>
-        <div>
-          <label className="field-label">Questions</label>
-          <select className="field-select" value={ctx.numQ} onChange={e => ctx.setNumQ(Number(e.target.value))}>
-            {[5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150].map(n => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </div>
-        {ctx.mode !== "study" && (
-          <div>
-            <label className="field-label">Type</label>
-            <select className="field-select" value={ctx.qType} onChange={e => ctx.setQType(e.target.value)}>
-              <option value="mixed">Mixed</option>
-              <option value="mcq">Multiple Choice</option>
-              <option value="tf">True / False</option>
-              <option value="fill">Fill in Blank</option>
-            </select>
-          </div>
-        )}
-        <div>
-          <label className="field-label">Language</label>
-          <select className="field-select" value={ctx.lang} onChange={e => ctx.setLang(e.target.value)}>
-            {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="field-label">Your Name</label>
-          <input className="field-input" style={{ width: 140 }} placeholder="e.g. Alex"
-            value={ctx.playerName} onChange={e => ctx.setPlayerName(e.target.value)} />
-        </div>
-      </div>
-
-      {/* Toggles */}
-      {ctx.mode === "quiz" && (
-        <div className="toggles-row">
-          <Toggle on={ctx.useTimer} onChange={ctx.setUseTimer} label="Timer (30s)" />
-          <Toggle on={ctx.useStreak} onChange={ctx.setUseStreak} label="Streak" />
-          <Toggle on={ctx.useSounds} onChange={ctx.setUseSounds} label="Sounds" />
-          {ctx.tab === "topic" && <Toggle on={ctx.autoDiff} onChange={ctx.setAutoDiff} label="Auto-difficulty" />}
-          <Toggle on={ctx.mpAfterGenerate} onChange={ctx.setMpAfterGenerate} label="Host room after generate" />
-        </div>
-      )}
-
-      {ctx.error && <div className="alert-error" style={{ marginTop: 16 }}>{ctx.error}</div>}
-
-      {/* Generate button */}
-      <button className="btn-primary" style={{ marginTop: 24, width: "100%", padding: "14px" }} onClick={generate} disabled={genDisabled}>
-        Generate {ctx.mode === "study" ? "Study Guide" : ctx.mode === "flashcard" ? "Flashcards" : "Quiz"}
-      </button>
-
-      <hr className="section-divider" />
-
-      {/* Multiplayer */}
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Multiplayer</div>
-        <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 16 }}>Play with others across devices using a room code</div>
-
-        {ctx.mpError && <div className="alert-error" style={{ marginBottom: 12 }}>{ctx.mpError}</div>}
-
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <label className="field-label">Host a game</label>
-            <button
-              className="btn-secondary"
-              style={{ width: "100%", opacity: ctx.questions.length > 0 ? 1 : 0.4 }}
-              onClick={ctx.questions.length > 0 ? hostGame : () => ctx.setError("Generate a quiz first.")}
-              disabled={ctx.questions.length === 0}
-            >
-              {ctx.questions.length > 0 ? `Create Room (${ctx.questions.length} questions)` : "Generate a quiz first"}
-            </button>
-          </div>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <label className="field-label">Join a game</label>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input className="field-input" placeholder="CODE" maxLength={4}
-                value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
-                style={{ letterSpacing: 4, fontWeight: 700, textAlign: "center" }} />
-              <button className="btn-primary" onClick={joinGame}>Join</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Manual Questions */}
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{
-          padding: "14px 20px", fontSize: 14, fontWeight: 700,
-          borderBottom: showManual ? "1px solid var(--bdr,#3e3e3e)" : "none",
-          cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
-        }} onClick={() => setShowManual(m => !m)}>
-          Manual Questions
-          <span style={{ opacity: 0.4, fontSize: 12 }}>{showManual ? "▲" : "▼"}</span>
-        </div>
-        {showManual && (
-          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-            <input className="field-input" placeholder="Question" value={manualQ} onChange={e => setManualQ(e.target.value)} />
-            <div style={{ display: "flex", gap: 8 }}>
-              <input className="field-input" placeholder="Answer" value={manualA} onChange={e => setManualA(e.target.value)} />
-              <button className="btn-secondary" style={{ whiteSpace: "nowrap" }} onClick={() => {
-                if (!manualQ.trim() || !manualA.trim()) return;
-                setManualList(l => [...l, { type: "fill", question: manualQ.trim(), answer: manualA.trim(), explanation: "" }]);
-                setManualQ(""); setManualA("");
-              }}>Add</button>
-            </div>
-            {manualList.map((mq, i) => (
-              <div key={i} className="card-sm" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{mq.question}</div>
-                  <div style={{ fontSize: 11, opacity: 0.5, marginTop: 3 }}>{mq.answer}</div>
-                </div>
-                <button style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16, opacity: 0.7 }}
-                  onClick={() => setManualList(l => l.filter((_, j) => j !== i))}>x</button>
+          {/* Mode selector */}
+          <div className="home-modes">
+            {MODES.map(m => (
+              <div key={m.id} className={`mode-card ${ctx.mode === m.id ? "active" : ""}`} onClick={() => ctx.setMode(m.id)}>
+                <div className="mode-card-title">{m.label}</div>
+                <div className="mode-card-desc">{m.desc}</div>
               </div>
             ))}
-            {manualList.length > 0 && (
-              <button className="btn-primary" onClick={() => startQuiz(manualList)}>
-                Start with {manualList.length} question{manualList.length !== 1 ? "s" : ""}
+          </div>
+
+          {/* Input tabs */}
+          <div className="tabs" style={{ marginBottom: 16 }}>
+            {TABS.map(([t, label]) => (
+              <button key={t} className={`tab-btn ${ctx.tab === t ? "active" : ""}`}
+                onClick={() => { ctx.setTab(t); ctx.setFile(null); }}>
+                {label}
               </button>
+            ))}
+          </div>
+
+          {/* Input area */}
+          {(ctx.tab === "pdf" || ctx.tab === "image") && (
+            <div className={`drop-zone ${drag ? "drag-over" : ""}`}
+              onDragOver={e => { e.preventDefault(); setDrag(true); }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={e => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) ctx.setFile(e.dataTransfer.files[0]); }}>
+              <input type="file" accept={ctx.tab === "pdf" ? ".pdf" : "image/*"} onChange={e => e.target.files[0] && ctx.setFile(e.target.files[0])} />
+              <div className="drop-label">Drop your {ctx.tab === "pdf" ? "PDF" : "image"} here</div>
+              <div className="drop-hint">or click to browse</div>
+              {ctx.file && <div className="drop-file-name">{ctx.file.name}</div>}
+            </div>
+          )}
+          {ctx.tab === "text" && (
+            <textarea className="text-area" placeholder="Paste your notes, article, or any text here..."
+              value={ctx.text} onChange={e => ctx.setText(e.target.value)} />
+          )}
+          {ctx.tab === "url" && (
+            <input className="field-input" placeholder="https://example.com/article"
+              value={ctx.urlVal} onChange={e => ctx.setUrlVal(e.target.value)} />
+          )}
+          {ctx.tab === "youtube" && (
+            <input className="field-input" placeholder="https://youtube.com/watch?v=..."
+              value={ctx.ytVal} onChange={e => { ctx.setYtVal(e.target.value); setYtStatus(""); }} />
+          )}
+          {ctx.tab === "topic" && (
+            <input className="field-input" style={{ fontSize: 15, padding: "13px 16px" }}
+              placeholder="e.g. World War 2, Photosynthesis, Python basics..."
+              value={ctx.topicVal} onChange={e => ctx.setTopicVal(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && !genDisabled && setShowSettings(true)} />
+          )}
+
+          {ctx.error && <div className="alert-error" style={{ marginTop: 16 }}>{ctx.error}</div>}
+
+          {/* Action buttons */}
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button
+              className="btn-primary"
+              style={{ flex: 1, padding: "13px" }}
+              onClick={() => { ctx.setError(""); if (!genDisabled) setShowSettings(true); }}
+              disabled={genDisabled}
+            >
+              Continue
+            </button>
+            <button
+              className="btn-secondary"
+              style={{ padding: "13px 18px" }}
+              onClick={() => { ctx.setError(""); if (!genDisabled) generate(); }}
+              disabled={genDisabled}
+              title="Generate with current settings"
+            >
+              Quick Generate
+            </button>
+          </div>
+
+          <p style={{ fontSize: 11, opacity: 0.35, textAlign: "center", marginTop: 10 }}>
+            Continue to set questions, type, language · or Quick Generate with defaults
+          </p>
+        </>
+      ) : (
+        /* ── PAGE 2: SETTINGS ── */
+        <>
+          <button className="back-btn" onClick={() => setShowSettings(false)}>
+            Back
+          </button>
+
+          <div className="page-heading">Settings</div>
+          <div className="page-sub">Customize your {ctx.mode === "study" ? "study guide" : ctx.mode === "flashcard" ? "flashcards" : "quiz"}</div>
+
+          <div className="card">
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+              <div>
+                <label className="field-label">Questions</label>
+                <select className="field-select" value={ctx.numQ} onChange={e => ctx.setNumQ(Number(e.target.value))}>
+                  {[5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              {ctx.mode !== "study" && (
+                <div>
+                  <label className="field-label">Type</label>
+                  <select className="field-select" value={ctx.qType} onChange={e => ctx.setQType(e.target.value)}>
+                    <option value="mixed">Mixed</option>
+                    <option value="mcq">Multiple Choice</option>
+                    <option value="tf">True / False</option>
+                    <option value="fill">Fill in Blank</option>
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="field-label">Language</label>
+                <select className="field-select" value={ctx.lang} onChange={e => ctx.setLang(e.target.value)}>
+                  {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="field-label">Your Name</label>
+                <input className="field-input" style={{ width: 140 }} placeholder="e.g. Alex"
+                  value={ctx.playerName} onChange={e => ctx.setPlayerName(e.target.value)} />
+              </div>
+            </div>
+
+            {ctx.mode === "quiz" && (
+              <div className="toggles-row">
+                <Toggle on={ctx.useTimer} onChange={ctx.setUseTimer} label="Timer (30s)" />
+                <Toggle on={ctx.useStreak} onChange={ctx.setUseStreak} label="Streak" />
+                <Toggle on={ctx.useSounds} onChange={ctx.setUseSounds} label="Sounds" />
+                {ctx.tab === "topic" && <Toggle on={ctx.autoDiff} onChange={ctx.setAutoDiff} label="Auto-difficulty" />}
+                <Toggle on={ctx.mpAfterGenerate} onChange={ctx.setMpAfterGenerate} label="Host room after generate" />
+              </div>
             )}
           </div>
-        )}
-      </div>
+
+          {ctx.error && <div className="alert-error">{ctx.error}</div>}
+
+          <button className="btn-primary" style={{ width: "100%", padding: "14px", marginTop: 8 }} onClick={generate}>
+            Generate {ctx.mode === "study" ? "Study Guide" : ctx.mode === "flashcard" ? "Flashcards" : "Quiz"}
+          </button>
+
+          <hr className="section-divider" />
+
+          {/* Multiplayer */}
+          <div className="card" style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Multiplayer</div>
+            <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 16 }}>Play with others using a shared room code</div>
+            {ctx.mpError && <div className="alert-error" style={{ marginBottom: 12 }}>{ctx.mpError}</div>}
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label className="field-label">Host a game</label>
+                <button
+                  className="btn-secondary"
+                  style={{ width: "100%", opacity: ctx.questions.length > 0 ? 1 : 0.4 }}
+                  onClick={ctx.questions.length > 0 ? hostGame : () => ctx.setError("Generate a quiz first.")}
+                  disabled={ctx.questions.length === 0}
+                >
+                  {ctx.questions.length > 0 ? `Create Room (${ctx.questions.length}q)` : "Generate a quiz first"}
+                </button>
+              </div>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label className="field-label">Join a game</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input className="field-input" placeholder="CODE" maxLength={4}
+                    value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
+                    style={{ letterSpacing: 4, fontWeight: 700, textAlign: "center" }} />
+                  <button className="btn-primary" onClick={joinGame}>Join</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Manual Questions */}
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{
+              padding: "14px 20px", fontSize: 14, fontWeight: 700,
+              borderBottom: showManual ? "1px solid var(--bdr,#3e3e3e)" : "none",
+              cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
+            }} onClick={() => setShowManual(m => !m)}>
+              Manual Questions
+              <span style={{ opacity: 0.4, fontSize: 12 }}>{showManual ? "▲" : "▼"}</span>
+            </div>
+            {showManual && (
+              <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                <input className="field-input" placeholder="Question" value={manualQ} onChange={e => setManualQ(e.target.value)} />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input className="field-input" placeholder="Answer" value={manualA} onChange={e => setManualA(e.target.value)} />
+                  <button className="btn-secondary" style={{ whiteSpace: "nowrap" }} onClick={() => {
+                    if (!manualQ.trim() || !manualA.trim()) return;
+                    setManualList(l => [...l, { type: "fill", question: manualQ.trim(), answer: manualA.trim(), explanation: "" }]);
+                    setManualQ(""); setManualA("");
+                  }}>Add</button>
+                </div>
+                {manualList.map((mq, i) => (
+                  <div key={i} className="card-sm" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{mq.question}</div>
+                      <div style={{ fontSize: 11, opacity: 0.5, marginTop: 3 }}>{mq.answer}</div>
+                    </div>
+                    <button style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16, opacity: 0.7 }}
+                      onClick={() => setManualList(l => l.filter((_, j) => j !== i))}>x</button>
+                  </div>
+                ))}
+                {manualList.length > 0 && (
+                  <button className="btn-primary" onClick={() => startQuiz(manualList)}>
+                    Start with {manualList.length} question{manualList.length !== 1 ? "s" : ""}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
     </div>
   );
