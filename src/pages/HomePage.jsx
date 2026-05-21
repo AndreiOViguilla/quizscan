@@ -9,9 +9,44 @@ const TABS = [
   ["url", "URL"], ["youtube", "YT"], ["topic", "TOPIC"],
 ];
 const MODES = [
-  { id: "quiz", label: "QUIZ", desc: "Test yourself with questions" },
-  { id: "study", label: "STUDY", desc: "Read Q&A side by side" },
-  { id: "flashcard", label: "CARDS", desc: "Flip cards to memorize" },
+  {
+    id: "quiz",
+    desc: "Test yourself with questions",
+    icon: (
+      <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+        <rect x="6" y="6" width="28" height="28" rx="4" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M20 17c0-1.657 1.343-3 3-3s3 1.343 3 3c0 1.5-1.5 2.5-2.5 3.5V22" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <circle cx="23.5" cy="25" r="1" fill="currentColor"/>
+        <path d="M10 18h6M10 22h4M10 26h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    ),
+    label: "Quiz"
+  },
+  {
+    id: "study",
+    desc: "Read Q&A side by side",
+    icon: (
+      <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+        <rect x="6" y="8" width="12" height="24" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+        <rect x="22" y="8" width="12" height="24" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M9 14h6M9 18h6M9 22h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <path d="M25 14h6M25 18h6M25 22h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    ),
+    label: "Study"
+  },
+  {
+    id: "flashcard",
+    desc: "Flip cards to memorize",
+    icon: (
+      <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+        <rect x="4" y="12" width="24" height="16" rx="3" stroke="currentColor" strokeWidth="1.5"/>
+        <rect x="12" y="8" width="24" height="16" rx="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 2"/>
+        <path d="M10 20h12M10 24h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    ),
+    label: "Cards"
+  },
 ];
 
 export default function HomePage() {
@@ -377,6 +412,7 @@ export default function HomePage() {
           <div className="home-modes">
             {MODES.map(m => (
               <div key={m.id} className={`mode-card ${ctx.mode === m.id ? "active" : ""}`} onClick={() => ctx.setMode(m.id)}>
+                <div style={{ marginBottom: 10, opacity: ctx.mode === m.id ? 1 : 0.5 }}>{m.icon}</div>
                 <div className="mode-card-title">{m.label}</div>
                 <div className="mode-card-desc">{m.desc}</div>
               </div>
