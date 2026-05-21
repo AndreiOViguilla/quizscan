@@ -2,8 +2,8 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/transcript.py",
-      "use": "@vercel/python"
+      "src": "api/transcript.js",
+      "use": "@vercel/node"
     },
     {
       "src": "package.json",
@@ -12,7 +12,7 @@
     }
   ],
   "routes": [
-    { "src": "/api/transcript", "dest": "/api/transcript.py" },
+    { "src": "/api/transcript", "dest": "/api/transcript.js" },
     { "src": "/(.*)", "dest": "/$1" }
   ]
 }
