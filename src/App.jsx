@@ -47,10 +47,12 @@ function InnerApp() {
   const showFooter = !["quiz", "loading"].includes(page);
 
   return (
-    <div className="app" style={{ paddingTop: "57px" }}>
+    <div className="app-shell">
       <Confetti active={confetti} />
       <Header />
-      <Router />
+      <main className="app-body">
+        <Router />
+      </main>
       {showFooter && <Footer />}
     </div>
   );
