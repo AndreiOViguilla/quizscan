@@ -291,7 +291,7 @@ export default function HomePage() {
       ctx.setMpError("");
       const code = await createRoom(ctx.questions, name);
       const listener = new FirebaseListener(`/rooms/${code}/players`, (players) => {
-        if (players) {
+        if (players && typeof players === "object") {
           const arr = Object.values(players).sort((a, b) => (b.score || 0) - (a.score || 0));
           ctx.setMpPlayers(arr);
         }
@@ -317,7 +317,7 @@ export default function HomePage() {
       const room = await joinRoom(code, name);
       const players = room.players ? Object.values(room.players) : [];
       const listener = new FirebaseListener(`/rooms/${code}/players`, (ps) => {
-        if (ps) {
+        if (ps && typeof ps === "object") {
           const arr = Object.values(ps).sort((a, b) => (b.score || 0) - (a.score || 0));
           ctx.setMpPlayers(arr);
         }
