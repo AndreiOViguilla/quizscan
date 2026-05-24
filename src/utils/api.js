@@ -1,4 +1,4 @@
-import { GROQ_KEY, SUPABASE_URL, SUPABASE_KEY } from "./constants";
+import { GROQ_KEY } from "./constants";
 
 // ─── GROQ ─────────────────────────────────────────────────────────────────────
 export async function groq(messages, model = "llama-3.3-70b-versatile", maxTokens = 8000) {
@@ -30,52 +30,154 @@ export function parseQuestions(raw) {
   }
 }
 
-// ─── SUPABASE ─────────────────────────────────────────────────────────────────
-export async function sbFetch(path, method = "GET", body = null) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
-      "Prefer": method === "POST" ? "return=representation" : "return=minimal",
-    },
-    body: body ? JSON.stringify(body) : null,
+// ─── FIREBASE REALTIME DATABASE ───────────────────────────────────────────────
+const FB_URL = "https://quizscan-94acb-default-rtdb.asia-southeast1.firebasedatabase.app";
+
+async function fbGet(path) {
+  const res = await fetch(`${FB_URL}${path}.json`);
+  if (!res.ok) throw new Error(`Firebase GET failed: ${res.status}`);
+  return res.json();
+}
+
+async function fbSet(path, data) {
+  const res = await fetch(`${FB_URL}${path}.json`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error(await res.text());
-  const text = await res.text();
-  return text ? JSON.parse(text) : null;
+  if (!res.ok) throw new Error(`Firebase SET failed: ${res.status}`);
+  return res.json();
 }
 
-export class SupabaseRealtime {
-  constructor(roomId, onMessage) {
-    this.roomId = roomId;
-    this.onMessage = onMessage;
-    this.ws = null;
-    this.heartbeat = null;
+async function fbUpdate(path, data) {
+  const res = await fetch(`${FB_URL}${path}.json`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Firebase PATCH failed: ${res.status}`);
+  return res.json();
+}
+
+async function fbDelete(path) {
+  await fetch(`${FB_URL}${path}.json`, { method: "DELETE" });
+}
+
+// Generate a random 4-letter room code
+function genCode() {
+  return Math.random().toString(36).substring(2, 6).toUpperCase();
+}
+
+// ─── MULTIPLAYER API ──────────────────────────────────────────────────────────
+export async function createRoom(questions, hostName) {
+  let code = genCode();
+  // Make sure code is unique
+  let existing = await fbGet(`/rooms/${code}`);
+  while (existing) {
+    code = genCode();
+    existing = await fbGet(`/rooms/${code}`);
   }
+
+  await fbSet(`/rooms/${code}`, {
+    questions,
+    host: hostName || "Host",
+    status: "waiting",
+    createdAt: Date.now(),
+    players: {
+      [hostName || "Host"]: { name: hostName || "Host", score: 0, answer: null, ready: true }
+    }
+  });
+
+  return code;
+}
+
+export async function joinRoom(code, playerName) {
+  const room = await fbGet(`/rooms/${code}`);
+  if (!room) throw new Error("Room not found. Check the code and try again.");
+  if (room.status === "finished") throw new Error("This game has already ended.");
+
+  await fbUpdate(`/rooms/${code}/players/${playerName}`, {
+    name: playerName, score: 0, answer: null, ready: true
+  });
+
+  return room;
+}
+
+export async function getRoomPlayers(code) {
+  return fbGet(`/rooms/${code}/players`);
+}
+
+export async function submitAnswer(code, playerName, answer, isCorrect) {
+  await fbUpdate(`/rooms/${code}/players/${playerName}`, {
+    answer,
+    score: isCorrect ? (await fbGet(`/rooms/${code}/players/${playerName}/score`) || 0) + 1 : (await fbGet(`/rooms/${code}/players/${playerName}/score`) || 0)
+  });
+}
+
+export async function updateRoomStatus(code, status) {
+  await fbUpdate(`/rooms/${code}`, { status });
+}
+
+export async function deleteRoom(code) {
+  await fbDelete(`/rooms/${code}`);
+}
+
+// ─── FIREBASE REALTIME LISTENER ───────────────────────────────────────────────
+export class FirebaseListener {
+  constructor(path, onData) {
+    this.path = path;
+    this.onData = onData;
+    this.es = null;
+    this.interval = null;
+    this.lastData = null;
+  }
+
   connect() {
-    const wsUrl = `${SUPABASE_URL.replace("https://", "wss://")}/realtime/v1/websocket?apikey=${SUPABASE_KEY}&vsn=1.0.0`;
-    this.ws = new WebSocket(wsUrl);
-    this.ws.onopen = () => {
-      this.ws.send(JSON.stringify({ topic: `realtime:public:room_players:room_id=eq.${this.roomId}`, event: "phx_join", payload: {}, ref: "1" }));
-      this.heartbeat = setInterval(() => {
-        if (this.ws?.readyState === 1)
-          this.ws.send(JSON.stringify({ topic: "phoenix", event: "heartbeat", payload: {}, ref: "hb" }));
-      }, 20000);
-    };
-    this.ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.event === "INSERT" || msg.event === "UPDATE") this.onMessage(msg.payload?.record || msg.payload?.new);
-      } catch {}
-    };
-    this.ws.onerror = () => {};
-    this.ws.onclose = () => clearInterval(this.heartbeat);
+    // Use Server-Sent Events (Firebase REST streaming)
+    try {
+      this.es = new EventSource(`${FB_URL}${this.path}.json`);
+      this.es.addEventListener("put", (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.data && JSON.stringify(msg.data) !== JSON.stringify(this.lastData)) {
+            this.lastData = msg.data;
+            this.onData(msg.data);
+          }
+        } catch {}
+      });
+      this.es.addEventListener("patch", (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.data) this.onData({ ...this.lastData, ...msg.data });
+        } catch {}
+      });
+      this.es.onerror = () => this._fallbackPoll();
+    } catch {
+      this._fallbackPoll();
+    }
   }
-  disconnect() { clearInterval(this.heartbeat); this.ws?.close(); this.ws = null; }
+
+  _fallbackPoll() {
+    if (this.interval) return;
+    this.interval = setInterval(async () => {
+      try {
+        const data = await fbGet(this.path);
+        if (JSON.stringify(data) !== JSON.stringify(this.lastData)) {
+          this.lastData = data;
+          this.onData(data);
+        }
+      } catch {}
+    }, 2000);
+  }
+
+  disconnect() {
+    this.es?.close();
+    this.es = null;
+    if (this.interval) { clearInterval(this.interval); this.interval = null; }
+  }
 }
 
+// ─── SHARE ────────────────────────────────────────────────────────────────────
 export function encodeQuiz(questions) {
   try { return btoa(unescape(encodeURIComponent(JSON.stringify(questions)))).replace(/=/g, ""); }
   catch { return null; }
@@ -83,4 +185,10 @@ export function encodeQuiz(questions) {
 export function decodeQuiz(str) {
   try { return JSON.parse(decodeURIComponent(escape(atob(str)))); }
   catch { return null; }
+}
+
+// Keep sbFetch as no-op so old imports don't break
+export async function sbFetch() { return null; }
+export class SupabaseRealtime {
+  connect() {} disconnect() {}
 }
