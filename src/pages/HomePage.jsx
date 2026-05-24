@@ -54,6 +54,8 @@ export default function HomePage() {
   const [drag, setDrag] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [generated, setGenerated] = useState(null); // holds questions after generate
+  const [quickJoin, setQuickJoin] = useState("");
   const [showMp, setShowMp] = useState(false);
   const [manualQ, setManualQ] = useState("");
   const [manualA, setManualA] = useState("");
@@ -102,44 +104,10 @@ export default function HomePage() {
     ctx.quizStartTime.current = Date.now();
     if (ctx.mode === "study") { ctx.navigate("study"); return; }
     if (ctx.mode === "flashcard") { ctx.navigate("flashcard"); return; }
-    if (ctx.mpAfterGenerate) {
-      // Auto-create a room immediately
-      const code = Math.random().toString(36).substring(2, 6).toUpperCase();
-      const name = ctx.playerName || "Host";
-      ctx.setMyMpName(name);
-      ctx.setMpStatus("Creating room...");
-      try {
-        await sbFetch("/rooms", "POST", { id: code, questions: qs, host: name });
-        const player = await sbFetch("/room_players", "POST", { room_id: code, name, score: 0, current_q: 0 });
-        if (player?.[0]?.id) ctx.myPlayerIdRef.current = player[0].id;
-        ctx.setMpCode(code);
-        ctx.setMpPlayers([{ name, score: 0, isHost: true }]);
-        ctx.setMpMode("host");
-        ctx.setMpStatus("Waiting for players...");
-        const rt = new SupabaseRealtime(code, (record) => {
-          if (record?.name) ctx.setMpPlayers(prev => {
-            const ex = prev.find(p => p.name === record.name);
-            return ex ? prev.map(p => p.name === record.name ? { ...p, score: record.score } : p)
-              : [...prev, { name: record.name, score: record.score || 0 }];
-          });
-        });
-        rt.connect();
-        ctx.mpRealtimeRef.current = rt;
-        const poll = setInterval(async () => {
-          try {
-            const players = await sbFetch(`/room_players?room_id=eq.${code}&select=name,score,current_q`);
-            if (players) ctx.setMpPlayers(players.map((p, i) => ({ ...p, isHost: i === 0 })));
-          } catch {}
-        }, 3000);
-        setTimeout(() => clearInterval(poll), 300000);
-        ctx.navigate("multiplayer");
-      } catch (e) {
-        ctx.setMpError(`Failed to create room: ${e.message}`);
-        ctx.navigate("edit");
-      }
-      return;
-    }
-    ctx.navigate("edit");
+    // Show success screen — user presses Start to go to edit/quiz
+    setGenerated(qs);
+    setShowSettings(false);
+    ctx.navigate("home");
   };
 
   const generate = async () => {
@@ -369,7 +337,47 @@ export default function HomePage() {
   return (
     <div className="page" style={{ maxWidth: 620 }}>
 
-      {!showSettings ? (
+      {/* ── SUCCESS SCREEN ── */}
+      {generated && !showSettings ? (
+        <>
+          <div style={{ textAlign: "center", padding: "60px 0 40px" }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>
+              <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" width="64" height="64" style={{ margin: "0 auto", display: "block" }}>
+                <circle cx="32" cy="32" r="30" stroke="currentColor" strokeWidth="1.5" opacity="0.3"/>
+                <path d="M20 32l8 8 16-16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <h2 style={{ fontSize: 26, fontWeight: 700, marginBottom: 8 }}>Quiz generated!</h2>
+            <p style={{ opacity: 0.5, fontSize: 14, marginBottom: 32 }}>{generated.length} questions ready</p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <button className="btn-primary" style={{ padding: "12px 32px", fontSize: 15 }}
+                onClick={() => { ctx.navigate("edit"); }}>
+                Review & Start
+              </button>
+              <button className="btn-secondary" style={{ padding: "12px 20px" }}
+                onClick={() => { setGenerated(null); setShowSettings(false); }}>
+                Generate again
+              </button>
+            </div>
+          </div>
+
+          <hr className="section-divider" />
+
+          {/* Quick join on success screen too */}
+          <div className="card">
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Join a game</div>
+            <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>Enter a room code to join a friend</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input className="field-input" placeholder="Enter code" maxLength={4}
+                value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
+                style={{ letterSpacing: 4, fontWeight: 700, textAlign: "center", flex: 1 }} />
+              <button className="btn-primary" onClick={joinGame}>Join</button>
+            </div>
+            {ctx.mpError && <div className="alert-error" style={{ marginTop: 10 }}>{ctx.mpError}</div>}
+          </div>
+        </>
+
+      ) : !showSettings ? (
         /* ── PAGE 1: INPUT ── */
         <>
           <div className="home-hero">
@@ -433,36 +441,41 @@ export default function HomePage() {
 
           {/* Action buttons */}
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-            <button
-              className="btn-primary"
-              style={{ flex: 1, padding: "13px" }}
+            <button className="btn-primary" style={{ flex: 1, padding: "13px" }}
               onClick={() => { ctx.setError(""); if (!genDisabled) setShowSettings(true); }}
-              disabled={genDisabled}
-            >
+              disabled={genDisabled}>
               Continue
             </button>
-            <button
-              className="btn-secondary"
-              style={{ padding: "13px 18px" }}
+            <button className="btn-secondary" style={{ padding: "13px 18px" }}
               onClick={() => { ctx.setError(""); if (!genDisabled) generate(); }}
-              disabled={genDisabled}
-              title="Generate with current settings"
-            >
+              disabled={genDisabled} title="Generate with current settings">
               Quick Generate
             </button>
           </div>
-
           <p style={{ fontSize: 11, opacity: 0.35, textAlign: "center", marginTop: 10 }}>
             Continue to set questions, type, language · or Quick Generate with defaults
           </p>
+
+          <hr className="section-divider" />
+
+          {/* Join a game — on landing page */}
+          <div className="card">
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Join a game</div>
+            <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>Enter a room code from your host</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input className="field-input" placeholder="Enter code" maxLength={4}
+                value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
+                style={{ letterSpacing: 4, fontWeight: 700, textAlign: "center", flex: 1 }} />
+              <button className="btn-primary" onClick={joinGame}>Join</button>
+            </div>
+            {ctx.mpError && <div className="alert-error" style={{ marginTop: 10 }}>{ctx.mpError}</div>}
+          </div>
         </>
+
       ) : (
         /* ── PAGE 2: SETTINGS ── */
         <>
-          <button className="back-btn" onClick={() => setShowSettings(false)}>
-            Back
-          </button>
-
+          <button className="back-btn" onClick={() => setShowSettings(false)}>Back</button>
           <div className="page-heading">Settings</div>
           <div className="page-sub">Customize your {ctx.mode === "study" ? "study guide" : ctx.mode === "flashcard" ? "flashcards" : "quiz"}</div>
 
@@ -497,7 +510,6 @@ export default function HomePage() {
                   value={ctx.playerName} onChange={e => ctx.setPlayerName(e.target.value)} />
               </div>
             </div>
-
             {ctx.mode === "quiz" && (
               <div className="toggles-row">
                 <Toggle on={ctx.useTimer} onChange={ctx.setUseTimer} label="Timer (30s)" />
@@ -517,33 +529,16 @@ export default function HomePage() {
 
           <hr className="section-divider" />
 
-          {/* Multiplayer */}
+          {/* Multiplayer — host */}
           <div className="card" style={{ marginBottom: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Multiplayer</div>
-            <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 16 }}>Play with others using a shared room code</div>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Host a game</div>
+            <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>Generate a quiz first, then create a room for others to join</div>
             {ctx.mpError && <div className="alert-error" style={{ marginBottom: 12 }}>{ctx.mpError}</div>}
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 180 }}>
-                <label className="field-label">Host a game</label>
-                <button
-                  className="btn-secondary"
-                  style={{ width: "100%", opacity: ctx.questions.length > 0 ? 1 : 0.4 }}
-                  onClick={ctx.questions.length > 0 ? hostGame : () => ctx.setError("Generate a quiz first.")}
-                  disabled={ctx.questions.length === 0}
-                >
-                  {ctx.questions.length > 0 ? `Create Room (${ctx.questions.length}q)` : "Generate a quiz first"}
-                </button>
-              </div>
-              <div style={{ flex: 1, minWidth: 180 }}>
-                <label className="field-label">Join a game</label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input className="field-input" placeholder="CODE" maxLength={4}
-                    value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
-                    style={{ letterSpacing: 4, fontWeight: 700, textAlign: "center" }} />
-                  <button className="btn-primary" onClick={joinGame}>Join</button>
-                </div>
-              </div>
-            </div>
+            <button className="btn-secondary" style={{ width: "100%", opacity: ctx.questions.length > 0 ? 1 : 0.4 }}
+              onClick={ctx.questions.length > 0 ? hostGame : () => ctx.setError("Generate a quiz first.")}
+              disabled={ctx.questions.length === 0}>
+              {ctx.questions.length > 0 ? `Create Room (${ctx.questions.length} questions)` : "Generate a quiz first"}
+            </button>
           </div>
 
           {/* Manual Questions */}
