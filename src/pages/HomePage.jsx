@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useApp } from "../context/AppContext";
 import { Toggle } from "../components/Layout";
-import { groq, parseQuestions, sbFetch, SupabaseRealtime, decodeQuiz } from "../utils/api";
+import { groq, parseQuestions, createRoom, joinRoom, FirebaseListener, decodeQuiz } from "../utils/api";
 import { LANGUAGES } from "../utils/constants";
 
 const TABS = [
@@ -316,85 +316,54 @@ export default function HomePage() {
   };
 
   const hostGame = async () => {
-    if (!ctx.questions.length) return; // button is disabled so this shouldn't trigger
-    ctx.setMpError("");
-    const code = Math.random().toString(36).substring(2, 6).toUpperCase();
-    const name = ctx.playerName || "Host";
-    ctx.setMyMpName(name);
-    ctx.setMpStatus("Creating room...");
+    const name = ctx.playerName?.trim() || "Host";
     try {
-      await sbFetch("/rooms", "POST", { id: code, questions: ctx.questions, host: name });
-      const player = await sbFetch("/room_players", "POST", { room_id: code, name, score: 0, current_q: 0 });
-      if (player?.[0]?.id) ctx.myPlayerIdRef.current = player[0].id;
-      ctx.setMpCode(code);
-      ctx.setMpPlayers([{ name, score: 0, isHost: true }]);
-      ctx.setMpMode("host");
-      ctx.setMpStatus("Waiting for players...");
-      const rt = new SupabaseRealtime(code, (record) => {
-        if (record?.name) ctx.setMpPlayers(prev => {
-          const ex = prev.find(p => p.name === record.name);
-          return ex ? prev.map(p => p.name === record.name ? { ...p, score: record.score, current_q: record.current_q } : p)
-            : [...prev, { name: record.name, score: record.score || 0 }];
-        });
+      ctx.setMpError("");
+      const code = await createRoom(ctx.questions, name);
+      const listener = new FirebaseListener(`/rooms/${code}/players`, (players) => {
+        if (players) {
+          const arr = Object.values(players).sort((a, b) => (b.score || 0) - (a.score || 0));
+          ctx.setMpPlayers(arr);
+        }
       });
-      rt.connect();
-      ctx.mpRealtimeRef.current = rt;
-      const poll = setInterval(async () => {
-        try {
-          const players = await sbFetch(`/room_players?room_id=eq.${code}&select=name,score,current_q`);
-          if (players) ctx.setMpPlayers(players.map((p, i) => ({ ...p, isHost: i === 0 })));
-        } catch {}
-      }, 3000);
-      setTimeout(() => clearInterval(poll), 300000);
+      listener.connect();
+      ctx.mpRealtimeRef.current = listener;
+      ctx.setMpCode(code);
+      ctx.setMpMode("host");
+      ctx.setMpPlayers([{ name, score: 0 }]);
+      ctx.setMyMpName(name);
       ctx.navigate("multiplayer");
     } catch (e) {
-      ctx.setMpError(`Failed to create room: ${e.message}`);
-      ctx.setMpStatus("");
+      ctx.setMpError("Failed to create room: " + e.message);
     }
   };
 
   const joinGame = async () => {
-    const code = ctx.mpJoinCode.toUpperCase().trim();
-    if (!code) { ctx.setMpError("Enter a room code."); return; }
-    ctx.setMpError("");
-    const name = ctx.playerName || `Player${Math.floor(Math.random() * 99) + 2}`;
-    ctx.setMyMpName(name);
-    ctx.setMpStatus("Joining...");
+    const code = ctx.mpJoinCode?.trim().toUpperCase();
+    const name = ctx.playerName?.trim() || "Player";
+    if (!code || code.length !== 4) return ctx.setMpError("Enter a valid 4-letter room code.");
     try {
-      const rooms = await sbFetch(`/rooms?id=eq.${code}&select=*`);
-      if (!rooms?.length) { ctx.setMpError("Room not found. Check the code."); ctx.setMpStatus(""); return; }
-      ctx.setQuestions(rooms[0].questions);
-      ctx.resetQuizState();
-      const player = await sbFetch("/room_players", "POST", { room_id: code, name, score: 0, current_q: 0 });
-      if (player?.[0]?.id) ctx.myPlayerIdRef.current = player[0].id;
-      const players = await sbFetch(`/room_players?room_id=eq.${code}&select=name,score,current_q`);
-      ctx.setMpPlayers(players || [{ name, score: 0 }]);
+      ctx.setMpError("");
+      const room = await joinRoom(code, name);
+      const players = room.players ? Object.values(room.players) : [];
+      const listener = new FirebaseListener(`/rooms/${code}/players`, (ps) => {
+        if (ps) {
+          const arr = Object.values(ps).sort((a, b) => (b.score || 0) - (a.score || 0));
+          ctx.setMpPlayers(arr);
+        }
+      });
+      listener.connect();
+      ctx.mpRealtimeRef.current = listener;
       ctx.setMpCode(code);
       ctx.setMpMode("join");
-      ctx.setMpStatus("Connected!");
-      const rt = new SupabaseRealtime(code, (record) => {
-        if (record?.name) ctx.setMpPlayers(prev => {
-          const ex = prev.find(p => p.name === record.name);
-          return ex ? prev.map(p => p.name === record.name ? { ...p, score: record.score } : p)
-            : [...prev, { name: record.name, score: record.score || 0 }];
-        });
-      });
-      rt.connect();
-      ctx.mpRealtimeRef.current = rt;
-      const poll = setInterval(async () => {
-        try {
-          const ps = await sbFetch(`/room_players?room_id=eq.${code}&select=name,score,current_q`);
-          if (ps) ctx.setMpPlayers(ps);
-        } catch {}
-      }, 2000);
-      setTimeout(() => clearInterval(poll), 300000);
+      ctx.setMpPlayers(players);
+      ctx.setMyMpName(name);
+      ctx.questions = room.questions || [];
       ctx.navigate("multiplayer");
     } catch (e) {
-      ctx.setMpError(`Failed to join: ${e.message}`);
-      ctx.setMpStatus("");
+      ctx.setMpError("Failed to join: " + e.message);
     }
-  };
-
+  }
   const genDisabled = ["pdf", "image"].includes(ctx.tab) && !ctx.file;
 
   return (

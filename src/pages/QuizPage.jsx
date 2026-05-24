@@ -3,7 +3,7 @@ import { useApp } from "../context/AppContext";
 import { BackButton } from "../components/Layout";
 import { LETTERS, TIMER_SEC } from "../utils/constants";
 import { playSound } from "../utils/sounds";
-import { groq, sbFetch } from "../utils/api";
+import { groq } from "../utils/api";
 import { saveLB, saveHistory } from "../utils/storage";
 import { encodeQuiz } from "../utils/api";
 

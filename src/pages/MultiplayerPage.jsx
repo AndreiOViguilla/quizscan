@@ -23,7 +23,7 @@ export default function MultiplayerPage() {
   return (
     <div className="page">
       <h2 className="page-heading">{mpMode === "host" ? "Game Lobby" : "Joined Room"}</h2>
-      <p className="page-sub">// powered by Supabase — works across any device globally</p>
+      <p className="page-sub">// powered by Firebase — works across any device globally</p>
       <div className="mp-room-code">{mpCode}</div>
       <div className="mp-status-text">
         {mpStatus || (mpMode === "host"
