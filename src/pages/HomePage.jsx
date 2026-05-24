@@ -315,8 +315,8 @@ export default function HomePage() {
     try {
       ctx.setMpError("");
       const room = await joinRoom(code, name);
+      const assignedName = room.assignedName || name;
       const players = room.players ? Object.values(room.players) : [];
-      // Set questions from room data properly via context
       if (room.questions?.length) ctx.setQuestions(room.questions);
       const listener = new FirebaseListener(`/rooms/${code}/players`, (ps) => {
         if (ps && typeof ps === "object") {
@@ -329,7 +329,7 @@ export default function HomePage() {
       ctx.setMpCode(code);
       ctx.setMpMode("join");
       ctx.setMpPlayers(players);
-      ctx.setMyMpName(name);
+      ctx.setMyMpName(assignedName);
       ctx.navigate("multiplayer");
     } catch (e) {
       ctx.setMpError("Failed to join: " + e.message);

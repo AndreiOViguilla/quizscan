@@ -82,8 +82,17 @@ export async function joinRoom(code, playerName) {
   const room = await fbGet(`/rooms/${code}`);
   if (!room) throw new Error("Room not found. Check the code and try again.");
   if (room.status === "finished") throw new Error("This game has already ended.");
-  await fbUpdate(`/rooms/${code}/players/${playerName}`, { name: playerName, score: 0, answer: null, ready: true });
-  return room;
+  // Make name unique by appending number if already taken
+  const existing = room.players ? Object.keys(room.players) : [];
+  let uniqueName = playerName;
+  let counter = 2;
+  while (existing.includes(uniqueName)) {
+    uniqueName = `${playerName}${counter}`;
+    counter++;
+  }
+  await fbUpdate(`/rooms/${code}/players/${uniqueName}`, { name: uniqueName, score: 0, answer: null, ready: true });
+  // Return room with the unique name so caller knows what name was assigned
+  return { ...room, assignedName: uniqueName };
 }
 
 export async function deleteRoom(code) { await fbDelete(`/rooms/${code}`); }
