@@ -104,10 +104,9 @@ export default function HomePage() {
     ctx.quizStartTime.current = Date.now();
     if (ctx.mode === "study") { ctx.navigate("study"); return; }
     if (ctx.mode === "flashcard") { ctx.navigate("flashcard"); return; }
-    // Show success screen — user presses Start to go to edit/quiz
+    // Stay on settings page — just mark as generated so Start Quiz lights up
     setGenerated(qs);
-    setShowSettings(false);
-    ctx.navigate("home");
+    setShowSettings(true);
   };
 
   const generate = async () => {
