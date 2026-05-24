@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { useApp } from "../context/AppContext";
+import { pingRoom } from "../utils/api";
 import { BackButton } from "../components/Layout";
 
 export default function MultiplayerPage() {
@@ -6,6 +8,13 @@ export default function MultiplayerPage() {
   const { mpCode, mpMode, mpPlayers, myMpName, mpStatus, mpError, navigate, questions,
     mpRealtimeRef, setMpMode, setMpPlayers, setMpCode, setMpStatus, setMpError,
     resetQuizState, quizStartTime } = ctx;
+
+  // Ping room every 5 minutes to keep it alive
+  useEffect(() => {
+    if (!mpCode) return;
+    const interval = setInterval(() => pingRoom(mpCode), 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [mpCode]);
 
   const startGame = () => {
     resetQuizState();

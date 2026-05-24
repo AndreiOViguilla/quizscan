@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { AppProvider, useApp } from "./context/AppContext";
+import { cleanupExpiredRooms } from "./utils/api";
 import { makeGlobalStyles } from "./styles/theme";
 import { Header, Footer, Confetti } from "./components/Layout";
 
@@ -34,6 +35,9 @@ function Router() {
 function InnerApp() {
   const { dark, confetti, page } = useApp();
 
+  // Clean up expired rooms on load
+  useEffect(() => { cleanupExpiredRooms(); }, []);
+
   useEffect(() => {
     let el = document.getElementById("qs-global-styles");
     if (!el) { el = document.createElement("style"); el.id = "qs-global-styles"; document.head.appendChild(el); }
@@ -47,10 +51,12 @@ function InnerApp() {
   const showFooter = !["quiz", "loading"].includes(page);
 
   return (
-    <div className="app" style={{ paddingTop: "57px" }}>
+    <div className="app-shell">
       <Confetti active={confetti} />
       <Header />
-      <Router />
+      <main className="app-body">
+        <Router />
+      </main>
       {showFooter && <Footer />}
     </div>
   );

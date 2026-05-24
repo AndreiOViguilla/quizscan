@@ -72,10 +72,34 @@ export async function createRoom(questions, hostName) {
   let existing = await fbGet(`/rooms/${code}`);
   while (existing) { code = genCode(); existing = await fbGet(`/rooms/${code}`); }
   await fbSet(`/rooms/${code}`, {
-    questions, host: hostName || "Host", status: "waiting", createdAt: Date.now(),
+    questions, host: hostName || "Host", status: "waiting",
+    createdAt: Date.now(), lastActivity: Date.now(),
+    expiresAt: Date.now() + 60 * 60 * 1000, // 1 hour from now
     players: { [hostName || "Host"]: { name: hostName || "Host", score: 0, answer: null, ready: true } }
   });
+  // Schedule cleanup after 1 hour
+  setTimeout(() => deleteRoom(code).catch(() => {}), 60 * 60 * 1000);
   return code;
+}
+
+export async function pingRoom(code) {
+  try {
+    await fbUpdate(`/rooms/${code}`, { lastActivity: Date.now() });
+  } catch {}
+}
+
+export async function cleanupExpiredRooms() {
+  try {
+    const rooms = await fbGet("/rooms");
+    if (!rooms) return;
+    const now = Date.now();
+    for (const [code, room] of Object.entries(rooms)) {
+      const lastActivity = room.lastActivity || room.createdAt || 0;
+      if (now - lastActivity > 60 * 60 * 1000) {
+        await deleteRoom(code).catch(() => {});
+      }
+    }
+  } catch {}
 }
 
 export async function joinRoom(code, playerName) {
