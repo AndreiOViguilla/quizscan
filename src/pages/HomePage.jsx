@@ -340,7 +340,7 @@ export default function HomePage() {
   const genDisabled = ["pdf", "image"].includes(ctx.tab) && !ctx.file;
 
   return (
-    <div className="page" style={{ maxWidth: 620 }}>
+    <div className="page" style={{ maxWidth: 620, paddingTop: 72 }}>
 
       {/* ── SUCCESS SCREEN ── */}
       {generated && !showSettings ? (
@@ -566,6 +566,16 @@ export default function HomePage() {
               <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate} disabled={isGenerating}>
                 {isGenerating ? "Generating..." : generated ? "Regenerate" : "Generate"}
               </button>
+              {generated && (
+                <button className="btn-secondary" style={{ width: "100%", padding: "8px", fontSize: 12 }}
+                  onClick={async () => {
+                    const topic = ctx.topicVal || ctx.file?.name || ctx.urlVal || ctx.ytVal || "Shared Quiz";
+                    await shareQuizPublicly(generated, topic, ctx.playerName || "Anonymous");
+                    setShared(true);
+                  }}>
+                  {shared ? "Shared!" : "Share to Find Page"}
+                </button>
+              )}
             </div>
 
             {/* Start */}
@@ -591,6 +601,21 @@ export default function HomePage() {
               </button>
             </div>
           </div>
+
+          {/* Share Publicly button — shown after generating */}
+          {generated && (
+            <button
+              className="btn-secondary"
+              style={{ width: "100%", marginTop: 10, padding: "11px" }}
+              onClick={async () => {
+                const topic = ctx.topicVal || ctx.file?.name || ctx.urlVal || ctx.ytVal || "Shared Quiz";
+                await shareQuizPublicly(generated, topic, ctx.playerName || "Anonymous");
+                setShared(true);
+              }}
+            >
+              {shared ? "Shared to Find Page!" : "Share Publicly"}
+            </button>
+          )}
 
           <hr className="section-divider" />
 
