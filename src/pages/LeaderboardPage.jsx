@@ -5,7 +5,7 @@ import { clearLB } from "../utils/storage";
 export default function LeaderboardPage() {
   const { lb, setLb } = useApp();
   return (
-    <div className="page">
+    <div className="page" style={{ paddingTop: 72 }}>
       <BackButton to="home" />
       <h2 className="page-heading">Leaderboard</h2>
       <p className="page-sub">// top scores on this device · enter your name on home screen to appear here</p>

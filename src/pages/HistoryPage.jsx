@@ -13,7 +13,7 @@ export default function HistoryPage() {
   };
 
   return (
-    <div className="page">
+    <div className="page" style={{ paddingTop: 72 }}>
       <BackButton to="home" />
       <h2 className="page-heading">Quiz History</h2>
       <p className="page-sub">// your last 20 quizzes · click Replay to retake any</p>

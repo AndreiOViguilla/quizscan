@@ -99,7 +99,7 @@ export default function FindPage() {
   };
 
   return (
-    <div className="page" style={{ maxWidth: 700 }}>
+    <div className="page" style={{ maxWidth: 700, paddingTop: 72 }}>
       <BackButton to="home" label="Back to Home" />
 
       <div className="page-heading">Find Questions</div>
