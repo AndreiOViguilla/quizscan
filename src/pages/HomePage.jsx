@@ -523,9 +523,61 @@ export default function HomePage() {
 
           {ctx.error && <div className="alert-error">{ctx.error}</div>}
 
-          <button className="btn-primary" style={{ width: "100%", padding: "14px", marginTop: 8 }} onClick={generate}>
-            Generate {ctx.mode === "study" ? "Study Guide" : ctx.mode === "flashcard" ? "Flashcards" : "Quiz"}
-          </button>
+          {/* Two action buttons side by side */}
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            {/* Generate */}
+            <div style={{
+              flex: 1, border: "1px solid var(--bdr,#3e3e3e)", borderRadius: 10,
+              padding: "16px", display: "flex", flexDirection: "column", gap: 10,
+              background: "var(--bg2)"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {generated ? (
+                  <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
+                    <circle cx="10" cy="10" r="9" stroke="currentColor" strokeWidth="1.5" opacity="0.4"/>
+                    <path d="M6 10l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
+                    <circle cx="10" cy="10" r="9" stroke="currentColor" strokeWidth="1.5" opacity="0.3"/>
+                    <path d="M10 6v4M10 14h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                )}
+                <span style={{ fontWeight: 600, fontSize: 13 }}>
+                  {generated ? `${generated.length} questions ready` : "Generate Quiz"}
+                </span>
+              </div>
+              <p style={{ fontSize: 11, opacity: 0.45, margin: 0 }}>
+                {generated ? "Quiz generated successfully" : "AI will create questions from your content"}
+              </p>
+              <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate}>
+                {generated ? "Regenerate" : "Generate"}
+              </button>
+            </div>
+
+            {/* Start */}
+            <div style={{
+              flex: 1, border: `1px solid ${generated ? "var(--bdr2,#686868)" : "var(--bdr,#3e3e3e)"}`, borderRadius: 10,
+              padding: "16px", display: "flex", flexDirection: "column", gap: 10,
+              background: "var(--bg2)", opacity: generated ? 1 : 0.5
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
+                  <circle cx="10" cy="10" r="9" stroke="currentColor" strokeWidth="1.5" opacity="0.3"/>
+                  <path d="M8 7l5 3-5 3V7z" fill="currentColor" opacity="0.7"/>
+                </svg>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>Start Quiz</span>
+              </div>
+              <p style={{ fontSize: 11, opacity: 0.45, margin: 0 }}>
+                Review and edit questions before starting
+              </p>
+              <button className="btn-primary" style={{ width: "100%", padding: "10px" }}
+                disabled={!generated}
+                onClick={() => { if (generated) ctx.navigate("edit"); }}>
+                Review & Start
+              </button>
+            </div>
+          </div>
 
           <hr className="section-divider" />
 
