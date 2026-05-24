@@ -56,6 +56,7 @@ export default function HomePage() {
   const [showSettings, setShowSettings] = useState(false);
   const [generated, setGenerated] = useState(null); // holds questions after generate
   const [quickJoin, setQuickJoin] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
   const [showMp, setShowMp] = useState(false);
   const [manualQ, setManualQ] = useState("");
   const [manualA, setManualA] = useState("");
@@ -106,6 +107,7 @@ export default function HomePage() {
     if (ctx.mode === "flashcard") { ctx.navigate("flashcard"); return; }
     // Stay on settings page — just mark as generated so Start Quiz lights up
     setGenerated(qs);
+    setIsGenerating(false);
     setShowSettings(true);
   };
 
@@ -119,7 +121,7 @@ export default function HomePage() {
     if (tab === "youtube" && !ytVal.trim()) { ctx.setError("Please enter a YouTube URL first."); return; }
     if (tab === "topic" && !topicVal.trim()) { ctx.setError("Please enter a topic first."); return; }
 
-    ctx.navigate("loading");
+    setIsGenerating(true);
 
     try {
       const typeInstr = qType === "mixed" ? "Mix of multiple-choice (4 options), true/false, and fill-in-the-blank."
@@ -276,9 +278,10 @@ export default function HomePage() {
       if (ctx.tab === "youtube") {
         setYtStatus(prev => prev + "\nFATAL ERROR: " + msg);
       }
-      // Don't navigate away — stay on home and show error
+      // Stay on settings page and show error
       ctx.setError(msg);
-      ctx.navigate("home");
+      setIsGenerating(false);
+      setShowSettings(true);
     }
   };
 
@@ -549,8 +552,8 @@ export default function HomePage() {
               <p style={{ fontSize: 11, opacity: 0.45, margin: 0 }}>
                 {generated ? "Quiz generated successfully" : "AI will create questions from your content"}
               </p>
-              <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate}>
-                {generated ? "Regenerate" : "Generate"}
+              <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate} disabled={isGenerating}>
+                {isGenerating ? "Generating..." : generated ? "Regenerate" : "Generate"}
               </button>
             </div>
 
