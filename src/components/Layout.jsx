@@ -36,6 +36,7 @@ export function Header() {
   const { navigate, page, dark, setDark } = useApp();
   const NAV = [
     { label: "Home", to: "home" },
+    { label: "Find", to: "find" },
     { label: "Board", to: "leaderboard" },
     { label: "History", to: "history" },
   ];

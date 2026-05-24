@@ -14,6 +14,7 @@ import FlashcardPage from "./pages/FlashcardPage";
 import MultiplayerPage from "./pages/MultiplayerPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
 import HistoryPage from "./pages/HistoryPage";
+import FindPage from "./pages/FindPage";
 
 function Router() {
   const { page } = useApp();
@@ -28,6 +29,7 @@ function Router() {
     case "multiplayer": return <MultiplayerPage />;
     case "leaderboard": return <LeaderboardPage />;
     case "history":     return <HistoryPage />;
+    case "find":        return <FindPage />;
     default:            return <HomePage />;
   }
 }

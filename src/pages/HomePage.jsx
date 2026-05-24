@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useApp } from "../context/AppContext";
 import { Toggle } from "../components/Layout";
 import { groq, parseQuestions, createRoom, joinRoom, FirebaseListener, decodeQuiz } from "../utils/api";
+import { shareQuizPublicly } from "./FindPage";
 import { LANGUAGES } from "../utils/constants";
 
 const TABS = [
@@ -57,6 +58,7 @@ export default function HomePage() {
   const [generated, setGenerated] = useState(null); // holds questions after generate
   const [quickJoin, setQuickJoin] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [shared, setShared] = useState(false);
   const [showMp, setShowMp] = useState(false);
   const [manualQ, setManualQ] = useState("");
   const [manualA, setManualA] = useState("");
@@ -360,6 +362,14 @@ export default function HomePage() {
               <button className="btn-secondary" style={{ padding: "12px 20px" }}
                 onClick={() => { setGenerated(null); setShowSettings(false); }}>
                 Generate again
+              </button>
+              <button className="btn-secondary" style={{ padding: "12px 20px" }}
+                onClick={async () => {
+                  const topic = ctx.topicVal || ctx.file?.name || ctx.urlVal || ctx.ytVal || "Shared Quiz";
+                  await shareQuizPublicly(generated, topic, ctx.playerName || "Anonymous");
+                  setShared(true);
+                }}>
+                {shared ? "Shared!" : "Share Publicly"}
               </button>
             </div>
           </div>
