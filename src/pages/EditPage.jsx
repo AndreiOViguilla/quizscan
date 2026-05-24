@@ -1,7 +1,7 @@
 import { useApp } from "../context/AppContext";
 import { BackButton } from "../components/Layout";
 import { LETTERS } from "../utils/constants";
-import { sbFetch, SupabaseRealtime } from "../utils/api";
+
 
 export default function EditPage() {
   const ctx = useApp();
