@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useAuth } from "../context/AuthContext";
 import { useApp } from "../context/AppContext";
 import { BackButton } from "../components/Layout";
 
@@ -47,6 +48,7 @@ export default function FindPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     loadQuizzes();

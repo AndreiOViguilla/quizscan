@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { AppProvider, useApp } from "./context/AppContext";
+import { AuthProvider } from "./context/AuthContext";
 import { cleanupExpiredRooms } from "./utils/api";
 import { makeGlobalStyles } from "./styles/theme";
 import { Header, Footer, Confetti } from "./components/Layout";
@@ -66,8 +67,10 @@ function InnerApp() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <InnerApp />
-    </AppProvider>
+    <AuthProvider>
+      <AppProvider>
+        <InnerApp />
+      </AppProvider>
+    </AuthProvider>
   );
 }

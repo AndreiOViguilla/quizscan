@@ -3,6 +3,7 @@ import { useApp } from "../context/AppContext";
 import { Toggle } from "../components/Layout";
 import { groq, parseQuestions, createRoom, joinRoom, FirebaseListener, decodeQuiz } from "../utils/api";
 import { shareQuizPublicly } from "./FindPage";
+import { useAuth } from "../context/AuthContext";
 import { LANGUAGES } from "../utils/constants";
 
 const TABS = [
@@ -58,6 +59,7 @@ export default function HomePage() {
   const [generated, setGenerated] = useState(null); // holds questions after generate
   const [quickJoin, setQuickJoin] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const { user } = useAuth();
   const [shared, setShared] = useState(false);
   const [showMp, setShowMp] = useState(false);
   const [manualQ, setManualQ] = useState("");
@@ -608,8 +610,9 @@ export default function HomePage() {
               className="btn-secondary"
               style={{ width: "100%", marginTop: 10, padding: "11px" }}
               onClick={async () => {
+                if (!user) { ctx.setError("Please sign in to share quizzes publicly."); return; }
                 const topic = ctx.topicVal || ctx.file?.name || ctx.urlVal || ctx.ytVal || "Shared Quiz";
-                await shareQuizPublicly(generated, topic, ctx.playerName || "Anonymous");
+                await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous");
                 setShared(true);
               }}
             >
