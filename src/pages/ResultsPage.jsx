@@ -1,9 +1,28 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
 import { BackButton } from "../components/Layout";
+import { useAuth } from "../context/AuthContext";
+import { saveScore, checkAndUnlockAchievements } from "../utils/db";
 
 export default function ResultsPage() {
   const ctx = useApp();
+  const { user } = useAuth();
+  const [newAchievements, setNewAchievements] = useState([]);
+
+  useEffect(() => {
+    if (!user || !ctx.questions?.length) return;
+    const score = ctx.correctCount || 0;
+    const total = ctx.questions.length;
+    const topic = ctx.topicVal || ctx.file?.name || "Quiz";
+    saveScore(user, score, total, topic);
+    const plays = parseInt(localStorage.getItem("qs_plays") || "0") + 1;
+    localStorage.setItem("qs_plays", plays);
+    const shared = parseInt(localStorage.getItem("qs_shared") || "0");
+    checkAndUnlockAchievements(user, {
+      score, total, streak: ctx.streak || 0,
+      quizzesDone: plays, sharedCount: shared, isDaily: false
+    }).then(unlocked => { if (unlocked.length) setNewAchievements(unlocked); });
+  }, []);
   const { questions, answers, difficulty, bestStreak, useStreak, shareUrl, navigate, resetQuizState, quizStartTime, setAnswers, setStreak, setBestStreak, setRevealed, setSelected, setFillVal, setCurrent, setHintUsed, setHintText, setEliminated, setDifficulty, mode, setMode } = ctx;
   const [copied, setCopied] = useState(false);
 

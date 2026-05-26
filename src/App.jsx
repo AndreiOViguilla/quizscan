@@ -16,6 +16,8 @@ import MultiplayerPage from "./pages/MultiplayerPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
 import HistoryPage from "./pages/HistoryPage";
 import FindPage from "./pages/FindPage";
+import ProfilePage from "./pages/ProfilePage";
+import DailyPage from "./pages/DailyPage";
 
 function Router() {
   const { page } = useApp();
@@ -31,6 +33,8 @@ function Router() {
     case "leaderboard": return <LeaderboardPage />;
     case "history":     return <HistoryPage />;
     case "find":        return <FindPage />;
+    case "profile":     return <ProfilePage />;
+    case "daily":       return <DailyPage />;
     default:            return <HomePage />;
   }
 }

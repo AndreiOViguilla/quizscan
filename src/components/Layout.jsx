@@ -44,6 +44,7 @@ export function Header() {
   const NAV = [
     { label: "Home", to: "home" },
     { label: "Find", to: "find" },
+    { label: "Daily", to: "daily" },
     { label: "Board", to: "leaderboard" },
     { label: "History", to: "history" },
   ];
@@ -89,6 +90,13 @@ export function Header() {
                   <div style={{ fontSize: 11, opacity: 0.4, padding: "4px 10px 8px", borderBottom: "1px solid var(--bdr)", marginBottom: 4 }}>
                     {user.email}
                   </div>
+                  <button style={{
+                    width: "100%", textAlign: "left", background: "none", border: "none",
+                    padding: "8px 10px", cursor: "pointer", fontSize: 13, color: "inherit",
+                    borderRadius: 6, fontFamily: "inherit"
+                  }} onClick={() => { navigate("profile"); setShowUserMenu(false); }}>
+                    My Profile
+                  </button>
                   <button style={{
                     width: "100%", textAlign: "left", background: "none", border: "none",
                     padding: "8px 10px", cursor: "pointer", fontSize: 13, color: "#ef4444",
