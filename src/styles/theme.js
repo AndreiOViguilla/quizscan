@@ -88,7 +88,7 @@ export function makeGlobalStyles(dark) {
     .footer-left { font-size: 12px; color: ${v.dim}; }
     .footer-left span { color: ${v.txt2}; font-weight: 600; }
     .footer-right { display: flex; gap: 16px; }
-    .footer-link { font-size: 12px; color: ${v.dim}; cursor: pointer; transition: color .15s; }
+    .footer-link { font-size: 12px; color: ${v.dim}; cursor: pointer; transition: color .15s; background: none; border: none; padding: 0; font-family: inherit; }
     .footer-link:hover { color: ${v.txt}; }
 
     /* ── BACK BUTTON ── */
