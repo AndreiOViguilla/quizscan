@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { BackButton } from "../components/Layout";
 import { LETTERS, TIMER_SEC } from "../utils/constants";
@@ -25,6 +25,43 @@ export default function QuizPage() {
     navigate, quizStartTime,
   } = ctx;
 
+  // Tab-switch detection
+  const [tabSwitches, setTabSwitches] = useState(0);
+  const [showTabWarning, setShowTabWarning] = useState(false);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden) {
+        clearInterval(timerRef.current);
+        setTabSwitches(n => n + 1);
+      } else {
+        setShowTabWarning(true);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  const resumeQuiz = () => {
+    setShowTabWarning(false);
+    if (!useTimer || revealed) return;
+    timerRef.current = setInterval(() => {
+      setTimeLeft(t => {
+        if (t <= 1) {
+          clearInterval(timerRef.current);
+          const q = questions[current];
+          if (q) {
+            if (useSounds) playSound("wrong");
+            setAnswers(prev => ({ ...prev, [current]: { userAnswer: null, correct: false } }));
+            setRevealed(true); setStreak(0);
+          }
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+  };
+
   // Track time spent per question
   const qStartRef = useRef(Date.now());
   useEffect(() => { qStartRef.current = Date.now(); }, [current]);
@@ -32,6 +69,14 @@ export default function QuizPage() {
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e) => {
+      // Detect screenshot keys — can't block but blur content briefly as deterrent
+      const isScreenshot = e.key === "PrintScreen" || (e.shiftKey && e.metaKey && (e.key === "3" || e.key === "4" || e.key === "5")) || (e.shiftKey && e.key === "S" && (e.metaKey || e.ctrlKey));
+      if (isScreenshot) {
+        e.preventDefault();
+        const page = document.querySelector(".quiz-page");
+        if (page) { page.style.filter = "blur(12px)"; setTimeout(() => { page.style.filter = ""; }, 2000); }
+        return;
+      }
       if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
       const q = questions[current];
       if (!q) return;
@@ -179,6 +224,36 @@ export default function QuizPage() {
 
   return (
     <div className="page quiz-page" onContextMenu={e => e.preventDefault()}>
+
+      {/* Tab-switch warning overlay */}
+      {showTabWarning && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.78)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 3000, padding: 24,
+        }}>
+          <div style={{
+            background: "var(--bg2)", border: "2px solid #f59e0b",
+            borderRadius: 16, padding: "32px 28px", maxWidth: 340, width: "100%",
+            textAlign: "center",
+          }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>⚠</div>
+            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 8, color: "#f59e0b" }}>
+              Tab Switch Detected
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.65, marginBottom: 6 }}>
+              You left the quiz tab. The timer was paused.
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.4, marginBottom: 24, fontFamily: "'Space Mono',monospace" }}>
+              {tabSwitches} switch{tabSwitches !== 1 ? "es" : ""} this session
+            </div>
+            <button className="btn-primary" style={{ width: "100%", padding: 12 }} onClick={resumeQuiz}>
+              Resume Quiz
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header row */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
@@ -189,6 +264,7 @@ export default function QuizPage() {
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           {useStreak && streak >= 2 && <div className="badge">{streak}x streak</div>}
+          {tabSwitches > 0 && <div className="badge" style={{ color: "#f59e0b", borderColor: "#f59e0b" }}>⚠ {tabSwitches} switch{tabSwitches !== 1 ? "es" : ""}</div>}
           {mpCode && mpPlayers.map(p => (
             <div key={p.name} className="badge" style={{ opacity: p.name === myMpName ? 1 : 0.6 }}>
               {p.name.substring(0, 8)} {p.score || 0}
