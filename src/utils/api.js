@@ -12,6 +12,26 @@ export async function groq(messages, model = "llama-3.3-70b-versatile", maxToken
   return data.choices?.[0]?.message?.content || "";
 }
 
+// ─── HUGGING FACE → GROQ FALLBACK ────────────────────────────────────────────
+// Text-only tasks: try HF (Qwen2.5-72B) first, fall back to Groq on any failure.
+const HF_MODEL = "Qwen/Qwen2.5-72B-Instruct";
+
+export async function generateText(messages, maxTokens = 8000) {
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, model: HF_MODEL, maxTokens }),
+    });
+    const data = await res.json();
+    if (res.ok && data.content) return data.content;
+    console.warn("HF failed, falling back to Groq:", data.error);
+  } catch (e) {
+    console.warn("HF request error, falling back to Groq:", e.message);
+  }
+  return groq(messages, "llama-3.3-70b-versatile", maxTokens);
+}
+
 export function parseQuestions(raw) {
   let cleaned = raw.replace(/```json|```/g, "").trim();
   const s = cleaned.indexOf("["), e = cleaned.lastIndexOf("]");

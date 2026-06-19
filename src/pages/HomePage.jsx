@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useApp } from "../context/AppContext";
 import { Toggle } from "../components/Layout";
-import { groq, parseQuestions, createRoom, joinRoom, FirebaseListener, decodeQuiz } from "../utils/api";
+import { groq, generateText, parseQuestions, createRoom, joinRoom, FirebaseListener, decodeQuiz } from "../utils/api";
 import { shareQuizPublicly } from "./FindPage";
 import { useAuth } from "../context/AuthContext";
 import { LANGUAGES } from "../utils/constants";
@@ -183,7 +183,7 @@ export default function HomePage() {
         const urlPrompt = pageText
           ? "Generate exactly " + numQ + " quiz questions from this webpage content:\n\n" + pageText + "\n\n" + typeInstr + " " + langNote + " " + jsonInstr
           : "Generate exactly " + numQ + " quiz questions about the topic of this URL: " + urlVal + ". Use your knowledge about what this page likely contains. " + typeInstr + " " + langNote + " " + jsonInstr;
-        const raw = await groq([{ role: "user", content: urlPrompt }]);
+        const raw = await generateText([{ role: "user", content: urlPrompt }]);
         await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "youtube") {
         const videoId = ytVal.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/)?.[1];
@@ -264,15 +264,18 @@ export default function HomePage() {
           ytPrompt = "Generate exactly " + numQ + " quiz questions about this YouTube video URL: " + ytVal + ". The video ID is " + videoId + ". Generate questions specifically about what this exact video covers — its topic, content, people involved. Do NOT generate generic unrelated questions. " + typeInstr + " " + langNote + " " + jsonInstr;
         }
 
-        const raw = await groq([{ role: "user", content: ytPrompt }]);
+        const raw = await generateText([{ role: "user", content: ytPrompt }]);
         await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "topic") {
-        const raw = await groq([{ role: "user", content: `Generate exactly ${numQ} quiz questions about: ${topicVal}\n${typeInstr} ${langNote} ${jsonInstr}` }], "llama-3.3-70b-versatile", numQ > 25 ? 8000 : 4000);
+        const raw = await generateText([{ role: "user", content: `Generate exactly ${numQ} quiz questions about: ${topicVal}\n${typeInstr} ${langNote} ${jsonInstr}` }], numQ > 25 ? 8000 : 4000);
         await startQuiz(parseQuestions(raw)); return;
       } else {
-        messages = [{ role: "user", content: `Quiz generator. Generate exactly ${numQ} questions from:\n\n${text.trim().substring(0, 4000)}\n\n${typeInstr} ${langNote} ${jsonInstr}` }];
+        // text tab — use HF with Groq fallback
+        const raw = await generateText([{ role: "user", content: `Quiz generator. Generate exactly ${numQ} questions from:\n\n${text.trim().substring(0, 4000)}\n\n${typeInstr} ${langNote} ${jsonInstr}` }]);
+        await startQuiz(parseQuestions(raw)); return;
       }
 
+      // image / pdf — vision model, Groq only
       const raw = await groq(messages, model);
       await startQuiz(parseQuestions(raw));
     } catch (e) {
