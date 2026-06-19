@@ -1,5 +1,19 @@
 const crypto = require("crypto");
 
+// Simple per-IP rate limit: 10 requests/minute per instance
+const rateLimits = new Map();
+function checkRateLimit(ip, max = 10, windowMs = 60000) {
+  const now = Date.now();
+  const entry = rateLimits.get(ip) || { count: 0, reset: now + windowMs };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + windowMs; }
+  entry.count++;
+  rateLimits.set(ip, entry);
+  if (rateLimits.size > 500) {
+    for (const [k, v] of rateLimits) { if (now > v.reset) rateLimits.delete(k); }
+  }
+  return entry.count <= max;
+}
+
 function verifySignature(bodyStr, ts, sig) {
   const secret = process.env.GENERATE_SECRET;
   if (!secret) return true; // skip check if secret not configured
@@ -21,6 +35,10 @@ module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Timestamp, X-Signature");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  // Rate limit by IP
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
+  if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests. Please wait a minute." });
 
   // Verify HMAC signature
   const bodyStr = JSON.stringify(req.body);

@@ -1,6 +1,6 @@
-import { useEffect, useCallback } from "react";
+import { useEffect } from "react";
 import { AppProvider, useApp } from "./context/AppContext";
-import { AuthProvider } from "./context/AuthContext";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 import { cleanupExpiredRooms } from "./utils/api";
 import { makeGlobalStyles } from "./styles/theme";
 import { Header, Footer, Confetti } from "./components/Layout";
@@ -39,6 +39,30 @@ function Router() {
   }
 }
 
+// Signs out after 30 min of no mouse/keyboard/touch activity
+function IdleLogout() {
+  const { user, signOut } = useAuth();
+
+  useEffect(() => {
+    if (!user) return;
+    const IDLE_MS = 30 * 60 * 1000;
+    let timer;
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => signOut(), IDLE_MS);
+    };
+    const events = ["mousedown", "mousemove", "keydown", "scroll", "touchstart", "click"];
+    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => {
+      clearTimeout(timer);
+      events.forEach(e => window.removeEventListener(e, reset));
+    };
+  }, [user, signOut]);
+
+  return null;
+}
+
 function InnerApp() {
   const { dark, confetti, page } = useApp();
 
@@ -73,6 +97,7 @@ export default function App() {
   return (
     <AuthProvider>
       <AppProvider>
+        <IdleLogout />
         <InnerApp />
       </AppProvider>
     </AuthProvider>

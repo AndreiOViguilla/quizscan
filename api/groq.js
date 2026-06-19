@@ -1,9 +1,26 @@
+// Simple per-IP rate limit: 15 requests/minute per instance
+const rateLimits = new Map();
+function checkRateLimit(ip, max = 15, windowMs = 60000) {
+  const now = Date.now();
+  const entry = rateLimits.get(ip) || { count: 0, reset: now + windowMs };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + windowMs; }
+  entry.count++;
+  rateLimits.set(ip, entry);
+  if (rateLimits.size > 500) {
+    for (const [k, v] of rateLimits) { if (now > v.reset) rateLimits.delete(k); }
+  }
+  return entry.count <= max;
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGIN || "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
+  if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests. Please wait a minute." });
 
   const { messages, model = "llama-3.3-70b-versatile", maxTokens = 8000 } = req.body;
   if (!messages?.length) return res.status(400).json({ error: "Missing messages" });
