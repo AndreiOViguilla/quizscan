@@ -49,6 +49,8 @@ export default function ResultsPage() {
     navigate("quiz");
   };
 
+  const escHtml = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
   const exportPDF = () => {
     const rows = questions.map((q, i) => {
       const a = answers[i];
@@ -57,11 +59,11 @@ export default function ResultsPage() {
       const diff = difficulty[i] || "";
       return `<tr style="background:${i % 2 === 0 ? "#f9f9f9" : "#fff"}">
         <td style="padding:8px;border:1px solid #ddd">${i + 1}</td>
-        <td style="padding:8px;border:1px solid #ddd">${q.question}</td>
-        <td style="padding:8px;border:1px solid #ddd;color:${a?.correct ? "#2e7d32" : "#c62828"}">${ua}</td>
-        <td style="padding:8px;border:1px solid #ddd;color:#2e7d32">${dc}</td>
+        <td style="padding:8px;border:1px solid #ddd">${escHtml(q.question)}</td>
+        <td style="padding:8px;border:1px solid #ddd;color:${a?.correct ? "#2e7d32" : "#c62828"}">${escHtml(ua)}</td>
+        <td style="padding:8px;border:1px solid #ddd;color:#2e7d32">${escHtml(dc)}</td>
         <td style="padding:8px;border:1px solid #ddd;text-align:center">${a?.correct ? "+" : "x"}</td>
-        <td style="padding:8px;border:1px solid #ddd;font-size:11px;color:#666">${diff}</td>
+        <td style="padding:8px;border:1px solid #ddd;font-size:11px;color:#666">${escHtml(diff)}</td>
       </tr>`;
     }).join("");
     const html = `<html><head><title>QuizScan Results</title></head><body style="font-family:sans-serif;padding:40px;max-width:860px;margin:0 auto">

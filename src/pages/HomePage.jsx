@@ -65,7 +65,8 @@ export default function HomePage() {
   const [manualQ, setManualQ] = useState("");
   const [manualA, setManualA] = useState("");
   const [manualList, setManualList] = useState([]);
-  const [ytStatus, setYtStatus] = useState(""); // shows inline under YT input
+  const [ytStatus, setYtStatus] = useState("");
+  const [genStatus, setGenStatus] = useState("");
 
   // Check URL for shared quiz on mount
   useState(() => {
@@ -126,6 +127,9 @@ export default function HomePage() {
     if (tab === "topic" && !topicVal.trim()) { ctx.setError("Please enter a topic first."); return; }
 
     setIsGenerating(true);
+    setGenStatus("Generating...");
+    const warmupTimer = setTimeout(() => setGenStatus("Warming up AI model — this may take up to 30s..."), 8000);
+    const slowTimer = setTimeout(() => setGenStatus("Still working, almost there..."), 22000);
 
     try {
       const typeInstr = qType === "mixed" ? "Mix of multiple-choice (4 options), true/false, and fill-in-the-blank."
@@ -281,14 +285,14 @@ export default function HomePage() {
     } catch (e) {
       console.error("Generate error:", e);
       const msg = e.message || "Something went wrong. Please try again.";
-      // If it was a youtube error, also update ytStatus
-      if (ctx.tab === "youtube") {
-        setYtStatus(prev => prev + "\nFATAL ERROR: " + msg);
-      }
-      // Stay on settings page and show error
+      if (ctx.tab === "youtube") setYtStatus(prev => prev + "\nFATAL ERROR: " + msg);
       ctx.setError(msg);
       setIsGenerating(false);
       setShowSettings(true);
+    } finally {
+      clearTimeout(warmupTimer);
+      clearTimeout(slowTimer);
+      setGenStatus("");
     }
   };
 
@@ -571,6 +575,7 @@ export default function HomePage() {
               <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate} disabled={isGenerating}>
                 {isGenerating ? "Generating..." : generated ? "Regenerate" : "Generate"}
               </button>
+              {genStatus && <div className="alert-info" style={{ marginTop: 8, fontSize: 12 }}>{genStatus}</div>}
               {generated && (
                 <button className="btn-secondary" style={{ width: "100%", padding: "8px", fontSize: 12 }}
                   onClick={async () => {

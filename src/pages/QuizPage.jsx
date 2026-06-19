@@ -3,8 +3,8 @@ import { useApp } from "../context/AppContext";
 import { BackButton } from "../components/Layout";
 import { LETTERS, TIMER_SEC } from "../utils/constants";
 import { playSound } from "../utils/sounds";
-import { groq } from "../utils/api";
-import { saveLB, saveHistory } from "../utils/storage";
+import { groq, updateMpScore } from "../utils/api";
+import { saveLB, saveHistory, loadHistory } from "../utils/storage";
 import { encodeQuiz } from "../utils/api";
 
 export default function QuizPage() {
@@ -94,9 +94,9 @@ export default function QuizPage() {
     const newAnswers = { ...answers, [current]: { userAnswer: ua, correct } };
     setAnswers(newAnswers);
     setRevealed(true);
-    if (mpCode && myPlayerIdRef.current) {
+    if (mpCode && myMpName) {
       const newScore = Object.values(newAnswers).filter(a => a.correct).length;
-      sbFetch(`/room_players?id=eq.${myPlayerIdRef.current}`, "PATCH", { score: newScore, current_q: current + 1, updated_at: new Date().toISOString() }).catch(() => {});
+      updateMpScore(mpCode, myMpName, newScore, current + 1).catch(() => {});
     }
     adaptDifficulty(newAnswers, current);
   };
@@ -118,13 +118,11 @@ export default function QuizPage() {
     if (pct === 100) { setConfetti(true); setTimeout(() => setConfetti(false), 5000); }
     if (playerName) { saveLB({ name: playerName, pct, correct, total: questions.length, time: elapsed, date: new Date().toLocaleDateString() }); setLb(prev => [...prev]); }
     saveHistory({ id: Date.now(), date: new Date().toLocaleString(), pct, correct, total: questions.length, questions, title: tab === "topic" ? topicVal : tab === "url" ? urlVal : file?.name || "Quiz" });
-    setHistory(loadHistory_());
+    setHistory(loadHistory());
     const encoded = encodeQuiz(questions);
     if (encoded) setShareUrl(`${window.location.origin}${window.location.pathname}?q=${encoded}`);
     navigate("results");
   };
-
-  function loadHistory_() { try { return JSON.parse(localStorage.getItem("qs_history") || "[]"); } catch { return []; } }
 
   const useHint = () => {
     if (hintUsed || revealed) return;

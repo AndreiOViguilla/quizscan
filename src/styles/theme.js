@@ -53,6 +53,21 @@ export function makeGlobalStyles(dark) {
     .topbar-btn:hover { background: ${v.bg3}; color: ${v.txt}; }
     .topbar-btn.active { background: ${v.bg3}; color: ${v.txt}; }
     .topbar-divider { width: 1px; height: 18px; background: ${v.bdr}; margin: 0 4px; }
+    .topbar-nav { display: flex; gap: 4px; align-items: center; }
+    .hamburger-btn { display: none; background: transparent; border: none; color: ${v.txt2}; cursor: pointer; padding: 6px; border-radius: 8px; }
+    .hamburger-btn:hover { background: ${v.bg3}; }
+    .mobile-menu {
+      position: fixed; top: 49px; left: 0; right: 0; z-index: 99;
+      background: ${v.bg}; border-bottom: 1px solid ${v.bdr};
+      display: flex; flex-direction: column; padding: 8px;
+      animation: slide-in .15s ease;
+    }
+    .mobile-menu .topbar-btn { text-align: left; padding: 10px 14px; width: 100%; border-radius: 8px; }
+    @media (max-width: 640px) {
+      .topbar-nav { display: none; }
+      .hamburger-btn { display: flex; align-items: center; justify-content: center; }
+      .topbar-right { gap: 2px; }
+    }
 
     /* ── FOOTER ── */
     .footer {

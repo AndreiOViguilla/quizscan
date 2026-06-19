@@ -40,6 +40,7 @@ export function Header() {
   const { user } = useAuth();
   const [showAuth, setShowAuth] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const NAV = [
     { label: "Home", to: "home" },
@@ -49,16 +50,27 @@ export function Header() {
     { label: "History", to: "history" },
   ];
 
+  const navTo = (to) => { navigate(to); setShowMobileMenu(false); };
+
   return (
     <>
       <div className="topbar">
         <div className="topbar-logo" onClick={() => navigate("home")}>QuizScan</div>
         <div className="topbar-right">
-          {NAV.map(n => (
-            <button key={n.to} className={`topbar-btn ${page === n.to ? "active" : ""}`} onClick={() => navigate(n.to)}>
-              {n.label}
-            </button>
-          ))}
+          <nav className="topbar-nav">
+            {NAV.map(n => (
+              <button key={n.to} className={`topbar-btn ${page === n.to ? "active" : ""}`} onClick={() => navigate(n.to)}>
+                {n.label}
+              </button>
+            ))}
+          </nav>
+          <button className="hamburger-btn" onClick={() => setShowMobileMenu(m => !m)} aria-label="Menu">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              {showMobileMenu
+                ? <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
+                : <><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></>}
+            </svg>
+          </button>
           <div className="topbar-divider" />
           <button className="topbar-btn" onClick={toggleDark} title={dark ? "Switch to light mode" : "Switch to dark mode"}
             style={{ padding: "6px 10px", display: "flex", alignItems: "center" }}>
@@ -127,6 +139,15 @@ export function Header() {
           )}
         </div>
       </div>
+      {showMobileMenu && (
+        <div className="mobile-menu">
+          {NAV.map(n => (
+            <button key={n.to} className={`topbar-btn ${page === n.to ? "active" : ""}`} onClick={() => navTo(n.to)}>
+              {n.label}
+            </button>
+          ))}
+        </div>
+      )}
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
     </>
   );

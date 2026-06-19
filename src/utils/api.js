@@ -218,5 +218,10 @@ export function decodeQuiz(str) {
   catch { return null; }
 }
 
-export async function sbFetch() { return null; }
-export class SupabaseRealtime { connect() {} disconnect() {} }
+export async function updateMpScore(code, playerName, score, currentQ) {
+  await fbUpdate(`/rooms/${code}/players/${playerName}`, {
+    score,
+    current_q: currentQ,
+    updated_at: new Date().toISOString(),
+  });
+}
