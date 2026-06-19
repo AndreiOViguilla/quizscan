@@ -183,7 +183,16 @@ export default function FindPage() {
         </div>
       )}
 
-      {loading && <div style={{ textAlign: "center", padding: "60px 0", opacity: 0.4, fontSize: 14 }}>Loading...</div>}
+      {loading && [0,1,2,3].map(i => (
+        <div key={i} className="skeleton-card">
+          <div className="skeleton" style={{ height: 16, width: "55%" }} />
+          <div className="skeleton" style={{ height: 12, width: "35%" }} />
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            <div className="skeleton" style={{ height: 22, width: 48, borderRadius: 20 }} />
+            <div className="skeleton" style={{ height: 22, width: 36, borderRadius: 20 }} />
+          </div>
+        </div>
+      ))}
 
       {!loading && filtered.length === 0 && (
         <div style={{ textAlign: "center", padding: "60px 0" }}>

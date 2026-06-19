@@ -39,6 +39,32 @@ function Router() {
   }
 }
 
+function Toast() {
+  const { toasts, dark } = useApp();
+  if (!toasts.length) return null;
+  return (
+    <div style={{
+      position: "fixed", bottom: 24, right: 24, zIndex: 9999,
+      display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end",
+      pointerEvents: "none",
+    }}>
+      {toasts.map(t => (
+        <div key={t.id} style={{
+          padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 500,
+          background: t.type === "error" ? "#ef4444" : dark ? "#2f2f2f" : "#ffffff",
+          color: t.type === "error" ? "#fff" : "inherit",
+          border: t.type === "error" ? "none" : "1px solid var(--bdr)",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.18)",
+          animation: "slide-in .2s ease",
+          maxWidth: 300,
+        }}>
+          {t.message}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Signs out after 30 min of no mouse/keyboard/touch activity
 function IdleLogout() {
   const { user, signOut } = useAuth();
@@ -85,10 +111,11 @@ function InnerApp() {
     <div className="app-shell">
       <Confetti active={confetti} />
       <Header />
-      <main className="app-body">
+      <main key={page} className="app-body">
         <Router />
       </main>
       {showFooter && <Footer />}
+      <Toast />
     </div>
   );
 }

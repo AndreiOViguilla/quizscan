@@ -23,12 +23,16 @@ export default function ResultsPage() {
       quizzesDone: plays, sharedCount: shared, isDaily: false
     }).then(unlocked => { if (unlocked.length) setNewAchievements(unlocked); });
   }, []);
-  const { questions, answers, difficulty, bestStreak, useStreak, shareUrl, navigate, resetQuizState, quizStartTime, setAnswers, setStreak, setBestStreak, setRevealed, setSelected, setFillVal, setCurrent, setHintUsed, setHintText, setEliminated, setDifficulty, mode, setMode, dark } = ctx;
+  const { questions, answers, difficulty, bestStreak, useStreak, shareUrl, navigate, resetQuizState, quizStartTime, setAnswers, setStreak, setBestStreak, setRevealed, setSelected, setFillVal, setCurrent, setHintUsed, setHintText, setEliminated, setDifficulty, mode, setMode, dark, showToast } = ctx;
   const [copied, setCopied] = useState(false);
 
   const correctCount = Object.values(answers).filter(a => a.correct).length;
   const wrongCount = questions.length - correctCount;
   const pct = questions.length ? Math.round((correctCount / questions.length) * 100) : 0;
+  const answeredList = Object.values(answers);
+  const totalTime = answeredList.reduce((s, a) => s + (a.timeTaken || 0), 0);
+  const avgTime = answeredList.length ? Math.round(totalTime / answeredList.length) : 0;
+  const slowestIdx = Object.entries(answers).reduce((best, [i, a]) => (a.timeTaken || 0) > (answers[best]?.timeTaken || 0) ? i : best, "0");
   const circ = 2 * Math.PI * 68;
   const dash = (pct / 100) * circ;
   const diffCounts = { easy: 0, medium: 0, hard: 0 };
@@ -109,6 +113,7 @@ export default function ResultsPage() {
         <div className="stat-box"><div className="stat-num" style={{ color: "#ef4444" }}>{wrongCount}</div><div className="stat-lbl">Wrong</div></div>
         <div className="stat-box"><div className="stat-num">{questions.length}</div><div className="stat-lbl">Total</div></div>
         {useStreak && <div className="stat-box"><div className="stat-num" style={{ color: "#ff9800" }}>{bestStreak}</div><div className="stat-lbl">Best Streak</div></div>}
+        {avgTime > 0 && <div className="stat-box"><div className="stat-num">{avgTime}s</div><div className="stat-lbl">Avg / Q</div></div>}
       </div>
 
       {(diffCounts.easy || diffCounts.medium || diffCounts.hard) > 0 && (
@@ -131,7 +136,7 @@ export default function ResultsPage() {
         <div className="share-box">
           <label className="field-label">Share this quiz</label>
           <div className="share-url">{shareUrl.substring(0, 80)}{shareUrl.length > 80 ? "..." : ""}</div>
-          <button className="copy-btn" onClick={() => { navigator.clipboard.writeText(shareUrl).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); }}>
+          <button className="copy-btn" onClick={() => { navigator.clipboard.writeText(shareUrl).then(() => { setCopied(true); showToast("Link copied to clipboard!"); setTimeout(() => setCopied(false), 2000); }); }}>
             {copied ? "+ Copied!" : "Copy Link"}
           </button>
         </div>
@@ -146,7 +151,11 @@ export default function ResultsPage() {
           const diff = difficulty[i];
           return (
             <div key={i} className={`review-item ${a?.correct ? "correct" : "wrong"}`}>
-              <div className="review-q">{i + 1}. {q.question} {diff && <span style={{ fontSize: 10, opacity: .6 }}>[{diff}]</span>}</div>
+              <div className="review-q">
+                {i + 1}. {q.question}
+                {diff && <span style={{ fontSize: 10, opacity: .6 }}> [{diff}]</span>}
+                {a?.timeTaken > 0 && <span style={{ fontSize: 10, opacity: .45, marginLeft: 8, fontFamily: "'Space Mono',monospace" }}>{a.timeTaken}s{String(i) === slowestIdx && answeredList.length > 2 ? " (slowest)" : ""}</span>}
+              </div>
               <div className="review-your">Your answer: {ua}</div>
               {!a?.correct && <div className="review-correct">+ Correct: {dc}</div>}
               {q.explanation && <div className="review-your" style={{ marginTop: 3, opacity: .7 }}>{q.explanation}</div>}

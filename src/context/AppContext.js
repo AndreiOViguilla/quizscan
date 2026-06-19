@@ -80,6 +80,14 @@ export function AppProvider({ children }) {
   // Error
   const [error, setError] = useState("");
 
+  // Toasts
+  const [toasts, setToasts] = useState([]);
+  const showToast = (message, type = "success") => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+  };
+
   // Refs
   const quizStartTime = useRef(null);
   const mpRealtimeRef = useRef(null);
@@ -149,6 +157,7 @@ export function AppProvider({ children }) {
       lb, setLb,
       history, setHistory,
       error, setError,
+      toasts, showToast,
       quizStartTime,
       mpRealtimeRef,
       myPlayerIdRef,

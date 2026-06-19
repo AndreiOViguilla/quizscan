@@ -29,8 +29,11 @@ export function makeGlobalStyles(dark) {
     a { color: ${v.txt2}; text-decoration: none; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
     @keyframes bar-fill { 0%{width:0%} 100%{width:100%} }
-    @keyframes slide-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes slide-in { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
     @keyframes fade-in { from{opacity:0} to{opacity:1} }
+    @keyframes skeleton-shimmer { 0%{opacity:.55} 50%{opacity:.25} 100%{opacity:.55} }
+    .skeleton { background:${v.bg3}; border-radius:8px; animation:skeleton-shimmer 1.6s ease-in-out infinite; }
+    .skeleton-card { background:${v.bg2}; border:1px solid ${v.bdr}; border-radius:14px; padding:18px; margin-bottom:10px; display:flex; flex-direction:column; gap:12px; }
 
     /* ── LAYOUT ── */
     .app { min-height: 100vh; background: ${v.bg}; display: flex; flex-direction: column; }

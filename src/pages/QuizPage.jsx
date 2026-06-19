@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
 import { BackButton } from "../components/Layout";
 import { LETTERS, TIMER_SEC } from "../utils/constants";
@@ -24,6 +24,37 @@ export default function QuizPage() {
     setShareUrl, setConfetti, setHistory, setLb,
     navigate, quizStartTime,
   } = ctx;
+
+  // Track time spent per question
+  const qStartRef = useRef(Date.now());
+  useEffect(() => { qStartRef.current = Date.now(); }, [current]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e) => {
+      if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
+      const q = questions[current];
+      if (!q) return;
+      if (!revealed) {
+        if (q.type === "mcq") {
+          const idx = { "1": 0, "2": 1, "3": 2, "4": 3 }[e.key];
+          if (idx !== undefined && idx < (q.choices?.length || 0) && !eliminated.includes(idx)) {
+            e.preventDefault(); setSelected(idx);
+          }
+          if ((e.key === "Enter" || e.key === " ") && selected !== null) {
+            e.preventDefault(); submitAnswer();
+          }
+        } else if (q.type === "tf") {
+          if (e.key.toLowerCase() === "t") { e.preventDefault(); submitAnswer("True"); }
+          if (e.key.toLowerCase() === "f") { e.preventDefault(); submitAnswer("False"); }
+        }
+      } else {
+        if (e.key === "Enter" || e.key === "ArrowRight") { e.preventDefault(); nextQuestion(); }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [questions, current, revealed, selected, eliminated, answers]);
 
   // Timer
   useEffect(() => {
@@ -91,7 +122,8 @@ export default function QuizPage() {
     if (useSounds) playSound(correct ? "correct" : "wrong");
     const ns = correct ? streak + 1 : 0;
     setStreak(ns); setBestStreak(b => Math.max(b, ns));
-    const newAnswers = { ...answers, [current]: { userAnswer: ua, correct } };
+    const timeTaken = Math.max(1, Math.round((Date.now() - qStartRef.current) / 1000));
+    const newAnswers = { ...answers, [current]: { userAnswer: ua, correct, timeTaken } };
     setAnswers(newAnswers);
     setRevealed(true);
     if (mpCode && myMpName) {
