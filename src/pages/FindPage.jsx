@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
+import { useQuiz } from "../context/QuizContext";
 import { useAuth } from "../context/AuthContext";
 import { BackButton } from "../components/Layout";
-import { fbGet, fbPush, fbUpdate, deleteSharedQuiz, reportQuiz, getComments, addComment, deleteComment } from "../utils/db";
+import { fbGet, fbUpdate, deleteSharedQuiz, reportQuiz, getComments, addComment, deleteComment } from "../utils/db";
 
 const stripHtml = (s) => String(s || "").replace(/<[^>]*>/g, "").trim();
 const sanitizeField = (s, max = 500) => stripHtml(s).substring(0, max);
@@ -41,14 +42,15 @@ const SORTS = [
 ];
 
 export default function FindPage() {
-  const ctx = useApp();
+  const { navigate } = useApp();
+  const { setQuestions, resetQuizState, quizStartTime } = useQuiz();
   const { user } = useAuth();
   const [quizzes, setQuizzes] = useState([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [sort, setSort] = useState("newest");
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState(null);
+  const [selectedQuiz, setSelectedQuiz] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
   const [reportReason, setReportReason] = useState("");
@@ -79,7 +81,7 @@ export default function FindPage() {
     });
 
   const openQuiz = async (quiz) => {
-    setSelected(quiz);
+    setSelectedQuiz(quiz);
     setComments([]);
     setCommentText("");
     setShowReport(false);
@@ -87,13 +89,13 @@ export default function FindPage() {
     setComments(c);
   };
 
-  const useQuiz = async (quiz) => {
-    ctx.setQuestions(quiz.questions);
-    ctx.resetQuizState();
-    ctx.quizStartTime.current = Date.now();
+  const handleUseQuiz = async (quiz) => {
+    setQuestions(quiz.questions);
+    resetQuizState();
+    quizStartTime.current = Date.now();
     await fbUpdate(`/shared_quizzes/${quiz.id}`, { plays: (quiz.plays || 0) + 1 });
-    setSelected(null);
-    ctx.navigate("edit");
+    setSelectedQuiz(null);
+    navigate("edit");
   };
 
   const likeQuiz = async (quiz, e) => {
@@ -105,19 +107,19 @@ export default function FindPage() {
     const newLikes = (quiz.likes || 0) + 1;
     await fbUpdate(`/shared_quizzes/${quiz.id}`, { likes: newLikes });
     setQuizzes(prev => prev.map(q => q.id === quiz.id ? { ...q, likes: newLikes } : q));
-    if (selected?.id === quiz.id) setSelected(s => ({ ...s, likes: newLikes }));
+    if (selectedQuiz?.id === quiz.id) setSelectedQuiz(s => ({ ...s, likes: newLikes }));
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this quiz?")) return;
     await deleteSharedQuiz(id);
     setQuizzes(q => q.filter(x => x.id !== id));
-    setSelected(null);
+    setSelectedQuiz(null);
   };
 
   const handleReport = async () => {
     if (!reportReason.trim()) return;
-    await reportQuiz(selected.id, reportReason, user?.uid);
+    await reportQuiz(selectedQuiz.id, reportReason, user?.uid);
     setShowReport(false);
     setReportReason("");
     alert("Reported. Thank you!");
@@ -125,14 +127,14 @@ export default function FindPage() {
 
   const handleComment = async () => {
     if (!user || !commentText.trim()) return;
-    await addComment(selected.id, user, commentText);
+    await addComment(selectedQuiz.id, user, commentText);
     setCommentText("");
-    const c = await getComments(selected.id);
+    const c = await getComments(selectedQuiz.id);
     setComments(c);
   };
 
   const handleDeleteComment = async (commentId) => {
-    await deleteComment(selected.id, commentId);
+    await deleteComment(selectedQuiz.id, commentId);
     setComments(c => c.filter(x => x.id !== commentId));
   };
 
@@ -149,7 +151,6 @@ export default function FindPage() {
       <div className="page-heading">Find Questions</div>
       <div className="page-sub">Browse quizzes shared by the community</div>
 
-      {/* Search + Sort */}
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
           <svg style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", opacity: 0.4 }}
@@ -165,7 +166,6 @@ export default function FindPage() {
         </select>
       </div>
 
-      {/* Category filter */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 20 }}>
         {CATEGORIES.map(c => (
           <button key={c} onClick={() => setCategory(c)} style={{
@@ -247,13 +247,12 @@ export default function FindPage() {
         </div>
       ))}
 
-      {/* Quiz Detail Modal */}
-      {selected && (
+      {selectedQuiz && (
         <div style={{
           position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
           display: "flex", alignItems: "center", justifyContent: "center",
           zIndex: 1000, padding: 24
-        }} onClick={() => setSelected(null)}>
+        }} onClick={() => setSelectedQuiz(null)}>
           <div style={{
             background: "var(--bg2)", border: "1px solid var(--bdr)",
             borderRadius: 16, padding: 28, maxWidth: 580, width: "100%",
@@ -261,42 +260,40 @@ export default function FindPage() {
           }} onClick={e => e.stopPropagation()}>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-              <div style={{ fontWeight: 700, fontSize: 20, flex: 1 }}>{selected.topic}</div>
-              <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", opacity: 0.4, color: "inherit" }}>✕</button>
+              <div style={{ fontWeight: 700, fontSize: 20, flex: 1 }}>{selectedQuiz.topic}</div>
+              <button onClick={() => setSelectedQuiz(null)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", opacity: 0.4, color: "inherit" }}>✕</button>
             </div>
             <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 20 }}>
-              by {selected.author} · {selected.count} questions · {timeAgo(selected.createdAt)}
+              by {selectedQuiz.author} · {selectedQuiz.count} questions · {timeAgo(selectedQuiz.createdAt)}
             </div>
 
-            {/* Preview */}
             <div style={{ fontSize: 11, opacity: 0.4, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>Preview</div>
-            {selected.questions?.slice(0, 3).map((q, i) => (
+            {selectedQuiz.questions?.slice(0, 3).map((q, i) => (
               <div key={i} className="card-sm" style={{ marginBottom: 6 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{i + 1}. {q.question}</div>
                 {q.choices && <div style={{ fontSize: 11, opacity: 0.5 }}>{q.choices.slice(0, 2).join(" · ")}...</div>}
                 {q.type === "tf" && <div style={{ fontSize: 11, opacity: 0.5 }}>True / False</div>}
               </div>
             ))}
-            {selected.questions?.length > 3 && (
+            {selectedQuiz.questions?.length > 3 && (
               <div style={{ fontSize: 12, opacity: 0.3, textAlign: "center", margin: "6px 0 14px" }}>
-                + {selected.questions.length - 3} more
+                + {selectedQuiz.questions.length - 3} more
               </div>
             )}
 
-            {/* Actions */}
             <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-              <button className="btn-primary" style={{ flex: 1, padding: "11px" }} onClick={() => useQuiz(selected)}>
+              <button className="btn-primary" style={{ flex: 1, padding: "11px" }} onClick={() => handleUseQuiz(selectedQuiz)}>
                 Use this Quiz
               </button>
               <button style={{
-                background: likedIds.includes(selected.id) ? "var(--bg3)" : "transparent",
+                background: likedIds.includes(selectedQuiz.id) ? "var(--bg3)" : "transparent",
                 border: "1px solid var(--bdr)", borderRadius: 8, padding: "11px 16px",
                 cursor: "pointer", fontSize: 13, color: "inherit", fontFamily: "inherit"
-              }} onClick={() => likeQuiz(selected)}>
-                ♥ {selected.likes || 0}
+              }} onClick={() => likeQuiz(selectedQuiz)}>
+                ♥ {selectedQuiz.likes || 0}
               </button>
-              {user && user.uid === selected.uid && (
-                <button className="btn-danger" style={{ padding: "11px 14px" }} onClick={() => handleDelete(selected.id)}>Delete</button>
+              {user && user.uid === selectedQuiz.uid && (
+                <button className="btn-danger" style={{ padding: "11px 14px" }} onClick={() => handleDelete(selectedQuiz.id)}>Delete</button>
               )}
               <button style={{
                 background: "transparent", border: "1px solid var(--bdr)", borderRadius: 8,
@@ -306,7 +303,6 @@ export default function FindPage() {
               </button>
             </div>
 
-            {/* Report */}
             {showReport && (
               <div style={{ marginTop: 12 }}>
                 <input className="field-input" placeholder="Reason for report..." value={reportReason}
@@ -315,7 +311,6 @@ export default function FindPage() {
               </div>
             )}
 
-            {/* Comments */}
             <div style={{ borderTop: "1px solid var(--bdr)", marginTop: 20, paddingTop: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>
                 Comments {comments.length > 0 && `(${comments.length})`}
@@ -330,7 +325,7 @@ export default function FindPage() {
                     <div style={{ fontSize: 12, fontWeight: 600 }}>{c.name} <span style={{ opacity: 0.4, fontWeight: 400 }}>{timeAgo(c.createdAt)}</span></div>
                     <div style={{ fontSize: 13, marginTop: 2 }}>{c.text}</div>
                   </div>
-                  {user && (user.uid === c.uid || user.uid === selected.uid) && (
+                  {user && (user.uid === c.uid || user.uid === selectedQuiz.uid) && (
                     <button onClick={() => handleDeleteComment(c.id)} style={{ background: "none", border: "none", cursor: "pointer", opacity: 0.3, fontSize: 12, color: "inherit" }}>✕</button>
                   )}
                 </div>

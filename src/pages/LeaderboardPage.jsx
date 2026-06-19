@@ -1,11 +1,9 @@
 import { useState, useEffect } from "react";
-import { useApp } from "../context/AppContext";
 import { useAuth } from "../context/AuthContext";
 import { BackButton } from "../components/Layout";
 import { getLeaderboard } from "../utils/db";
 
 export default function LeaderboardPage() {
-  const ctx = useApp();
   const { user } = useAuth();
   const [global, setGlobal] = useState([]);
   const [local, setLocal] = useState([]);
@@ -13,9 +11,7 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Load global leaderboard
     getLeaderboard().then(data => { setGlobal(data); setLoading(false); });
-    // Load local leaderboard
     try {
       const lb = JSON.parse(localStorage.getItem("qs_lb") || "[]");
       setLocal(lb.sort((a, b) => b.score - a.score));

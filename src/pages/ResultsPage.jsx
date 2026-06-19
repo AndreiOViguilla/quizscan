@@ -1,34 +1,39 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
+import { useSettings } from "../context/SettingsContext";
+import { useQuiz } from "../context/QuizContext";
 import { BackButton } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { saveScore, checkAndUnlockAchievements } from "../utils/db";
 
 export default function ResultsPage() {
-  const ctx = useApp();
+  const { navigate, dark, showToast } = useApp();
+  const { useStreak, mode, setMode, topicVal, file } = useSettings();
+  const {
+    questions, setQuestions, answers, difficulty, bestStreak, streak,
+    shareUrl, resetQuizState, quizStartTime,
+  } = useQuiz();
   const { user } = useAuth();
   const [newAchievements, setNewAchievements] = useState([]);
-
-  useEffect(() => {
-    if (!user || !ctx.questions?.length) return;
-    const score = ctx.correctCount || 0;
-    const total = ctx.questions.length;
-    const topic = ctx.topicVal || ctx.file?.name || "Quiz";
-    saveScore(user, score, total, topic);
-    const plays = parseInt(localStorage.getItem("qs_plays") || "0") + 1;
-    localStorage.setItem("qs_plays", plays);
-    const shared = parseInt(localStorage.getItem("qs_shared") || "0");
-    checkAndUnlockAchievements(user, {
-      score, total, streak: ctx.streak || 0,
-      quizzesDone: plays, sharedCount: shared, isDaily: false
-    }).then(unlocked => { if (unlocked.length) setNewAchievements(unlocked); });
-  }, []);
-  const { questions, answers, difficulty, bestStreak, useStreak, shareUrl, navigate, resetQuizState, quizStartTime, setAnswers, setStreak, setBestStreak, setRevealed, setSelected, setFillVal, setCurrent, setHintUsed, setHintText, setEliminated, setDifficulty, mode, setMode, dark, showToast } = ctx;
   const [copied, setCopied] = useState(false);
 
   const correctCount = Object.values(answers).filter(a => a.correct).length;
   const wrongCount = questions.length - correctCount;
   const pct = questions.length ? Math.round((correctCount / questions.length) * 100) : 0;
+
+  useEffect(() => {
+    if (!user || !questions?.length) return;
+    const topic = topicVal || file?.name || "Quiz";
+    saveScore(user, correctCount, questions.length, topic);
+    const plays = parseInt(localStorage.getItem("qs_plays") || "0") + 1;
+    localStorage.setItem("qs_plays", plays);
+    const shared = parseInt(localStorage.getItem("qs_shared") || "0");
+    checkAndUnlockAchievements(user, {
+      score: correctCount, total: questions.length, streak: streak || 0,
+      quizzesDone: plays, sharedCount: shared, isDaily: false
+    }).then(unlocked => { if (unlocked.length) setNewAchievements(unlocked); });
+  }, []);
+
   const answeredList = Object.values(answers);
   const totalTime = answeredList.reduce((s, a) => s + (a.timeTaken || 0), 0);
   const avgTime = answeredList.length ? Math.round(totalTime / answeredList.length) : 0;
@@ -47,7 +52,7 @@ export default function ResultsPage() {
   const retryWrong = () => {
     const wrongQs = questions.filter((_, i) => !answers[i]?.correct);
     if (!wrongQs.length) return;
-    ctx.setQuestions(wrongQs);
+    setQuestions(wrongQs);
     resetQuizState();
     quizStartTime.current = Date.now();
     navigate("quiz");

@@ -1,9 +1,11 @@
 import { useApp } from "../context/AppContext";
+import { useQuiz } from "../context/QuizContext";
 import { BackButton } from "../components/Layout";
 import { clearHistory, loadHistory } from "../utils/storage";
 
 export default function HistoryPage() {
-  const { history, setHistory, navigate, setQuestions, resetQuizState, quizStartTime, dark } = useApp();
+  const { history, setHistory, navigate, dark } = useApp();
+  const { setQuestions, resetQuizState, quizStartTime } = useQuiz();
 
   const replay = (entry) => {
     setQuestions(entry.questions);

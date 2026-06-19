@@ -1,4 +1,5 @@
 import { GROQ_KEY } from "./constants";
+import { fbGet, fbSet, fbUpdate, fbDelete } from "./db";
 
 // ─── REQUEST SIGNING (HMAC-SHA256) ────────────────────────────────────────────
 const GENERATE_SECRET = process.env.REACT_APP_GENERATE_SECRET || "";
@@ -29,7 +30,6 @@ export async function groq(messages, model = "llama-3.3-70b-versatile", maxToken
 }
 
 // ─── HUGGING FACE → GROQ FALLBACK ────────────────────────────────────────────
-// Text-only tasks: try HF (Qwen2.5-72B) first, fall back to Groq on any failure.
 const HF_MODEL = "Qwen/Qwen2.5-72B-Instruct";
 
 export async function generateText(messages, maxTokens = 8000) {
@@ -70,7 +70,6 @@ export async function generateText(messages, maxTokens = 8000) {
     failures.push(e.message || "Groq unreachable");
   }
 
-  // All providers failed
   const isRateLimit = failures.some(f => f.includes("rate limit") || f.includes("429"));
   throw new Error(
     isRateLimit
@@ -79,19 +78,38 @@ export async function generateText(messages, maxTokens = 8000) {
   );
 }
 
+// ─── JSON PARSER ──────────────────────────────────────────────────────────────
+// Extracts all top-level JSON objects from a string, handling nested braces.
+function extractJsonObjects(str) {
+  const results = [];
+  let depth = 0, start = -1;
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (str[i] === "}") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        try { results.push(JSON.parse(str.slice(start, i + 1))); } catch {}
+        start = -1;
+      }
+    }
+  }
+  return results;
+}
+
 export function parseQuestions(raw) {
   let cleaned = raw.replace(/```json|```/g, "").trim();
   const s = cleaned.indexOf("["), e = cleaned.lastIndexOf("]");
   if (s !== -1 && e !== -1) cleaned = cleaned.substring(s, e + 1);
   cleaned = cleaned
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
     .replace(/\n/g, " ")
     .replace(/\t/g, " ");
   try { return JSON.parse(cleaned); }
   catch {
-    const objs = []; const rx = /\{[^{}]*"question"[^{}]*\}/gs; let m;
-    while ((m = rx.exec(cleaned)) !== null) { try { objs.push(JSON.parse(m[0])); } catch {} }
+    const objs = extractJsonObjects(cleaned).filter(o => o.question);
     if (!objs.length) throw new Error("Could not parse questions.");
     return objs;
   }
@@ -99,36 +117,6 @@ export function parseQuestions(raw) {
 
 // ─── FIREBASE REALTIME DATABASE ───────────────────────────────────────────────
 const FB_URL = "https://quizscan-94acb-default-rtdb.asia-southeast1.firebasedatabase.app";
-
-async function fbGet(path) {
-  const res = await fetch(`${FB_URL}${path}.json`);
-  if (!res.ok) throw new Error(`Firebase GET failed: ${res.status}`);
-  return res.json();
-}
-
-async function fbSet(path, data) {
-  const res = await fetch(`${FB_URL}${path}.json`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error(`Firebase SET failed: ${res.status}`);
-  return res.json();
-}
-
-async function fbUpdate(path, data) {
-  const res = await fetch(`${FB_URL}${path}.json`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error(`Firebase PATCH failed: ${res.status}`);
-  return res.json();
-}
-
-async function fbDelete(path) {
-  await fetch(`${FB_URL}${path}.json`, { method: "DELETE" });
-}
 
 function genCode() {
   const arr = new Uint32Array(1);
@@ -143,10 +131,9 @@ export async function createRoom(questions, hostName) {
   await fbSet(`/rooms/${code}`, {
     questions, host: hostName || "Host", status: "waiting",
     createdAt: Date.now(), lastActivity: Date.now(),
-    expiresAt: Date.now() + 60 * 60 * 1000, // 1 hour from now
+    expiresAt: Date.now() + 60 * 60 * 1000,
     players: { [hostName || "Host"]: { name: hostName || "Host", score: 0, answer: null, ready: true } }
   });
-  // Schedule cleanup after 1 hour
   setTimeout(() => deleteRoom(code).catch(() => {}), 60 * 60 * 1000);
   return code;
 }
@@ -175,7 +162,6 @@ export async function joinRoom(code, playerName) {
   const room = await fbGet(`/rooms/${code}`);
   if (!room) throw new Error("Room not found. Check the code and try again.");
   if (room.status === "finished") throw new Error("This game has already ended.");
-  // Make name unique by appending number if already taken
   const existing = room.players ? Object.keys(room.players) : [];
   let uniqueName = playerName;
   let counter = 2;
@@ -184,7 +170,6 @@ export async function joinRoom(code, playerName) {
     counter++;
   }
   await fbUpdate(`/rooms/${code}/players/${uniqueName}`, { name: uniqueName, score: 0, answer: null, ready: true });
-  // Return room with the unique name so caller knows what name was assigned
   return { ...room, assignedName: uniqueName };
 }
 
@@ -198,7 +183,7 @@ export class FirebaseListener {
     this.es = null;
     this.interval = null;
     this.lastHash = null;
-    this._state = undefined; // local full-state cache
+    this._state = undefined;
   }
 
   connect() {
@@ -216,16 +201,13 @@ export class FirebaseListener {
           if (!msg) return;
           const isRoot = !msg.path || msg.path === "/";
           if (isRoot) {
-            // Full-state replacement (initial load or root overwrite)
             this._state = msg.data;
           } else {
-            // Child path update — merge into cached state
             const key = msg.path.replace(/^\//, "");
             if (this._state && typeof this._state === "object") {
               if (msg.data === null) delete this._state[key];
               else this._state[key] = msg.data;
             } else {
-              // No cached state yet; wait for the poll
               return;
             }
           }
@@ -258,7 +240,7 @@ export class FirebaseListener {
     this.interval = setInterval(async () => {
       try {
         const data = await fbGet(this.path);
-        this._state = data; // keep cache in sync with source of truth
+        this._state = data;
         this._emit(data);
       } catch {}
     }, 1500);

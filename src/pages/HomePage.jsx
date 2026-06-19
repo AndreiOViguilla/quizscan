@@ -1,5 +1,8 @@
 import { useState } from "react";
 import { useApp } from "../context/AppContext";
+import { useSettings } from "../context/SettingsContext";
+import { useQuiz } from "../context/QuizContext";
+import { useMultiplayer } from "../context/MultiplayerContext";
 import { Toggle } from "../components/Layout";
 import { groq, generateText, parseQuestions, createRoom, joinRoom, FirebaseListener, decodeQuiz } from "../utils/api";
 import { shareQuizPublicly } from "./FindPage";
@@ -52,11 +55,26 @@ const MODES = [
 ];
 
 export default function HomePage() {
-  const ctx = useApp();
+  const { navigate, error, setError } = useApp();
+  const {
+    mode, setMode, tab, setTab, file, setFile, text, setText,
+    urlVal, setUrlVal, ytVal, setYtVal, topicVal, setTopicVal,
+    numQ, setNumQ, qType, setQType, lang, setLang,
+    playerName, setPlayerName,
+    useTimer, setUseTimer, useStreak, setUseStreak,
+    useSounds, setUseSounds, autoDiff, setAutoDiff,
+    mpAfterGenerate, setMpAfterGenerate,
+  } = useSettings();
+  const { questions, setQuestions, resetQuizState, quizStartTime } = useQuiz();
+  const {
+    mpJoinCode, setMpJoinCode, mpError, setMpError,
+    mpRealtimeRef, setMpCode, setMpMode, setMpPlayers, setMyMpName, setMpSyncMode,
+  } = useMultiplayer();
+
   const [drag, setDrag] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [generated, setGenerated] = useState(null); // holds questions after generate
+  const [generated, setGenerated] = useState(null);
   const [quickJoin, setQuickJoin] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const { user } = useAuth();
@@ -68,7 +86,6 @@ export default function HomePage() {
   const [ytStatus, setYtStatus] = useState("");
   const [genStatus, setGenStatus] = useState("");
 
-  // Check URL for shared quiz on mount
   useState(() => {
     const params = new URLSearchParams(window.location.search);
     const qdata = params.get("q");
@@ -105,26 +122,24 @@ export default function HomePage() {
   };
 
   const startQuiz = async (qs) => {
-    ctx.setQuestions(qs);
-    ctx.resetQuizState();
-    ctx.quizStartTime.current = Date.now();
-    if (ctx.mode === "study") { ctx.navigate("study"); return; }
-    if (ctx.mode === "flashcard") { ctx.navigate("flashcard"); return; }
-    // Stay on settings page — just mark as generated so Start Quiz lights up
+    setQuestions(qs);
+    resetQuizState();
+    quizStartTime.current = Date.now();
+    if (mode === "study") { navigate("study"); return; }
+    if (mode === "flashcard") { navigate("flashcard"); return; }
     setGenerated(qs);
     setIsGenerating(false);
     setShowSettings(true);
   };
 
   const generate = async () => {
-    ctx.setError("");
-    const { tab, file, text, urlVal, ytVal, topicVal, numQ, qType, lang } = ctx;
-    if (tab === "pdf" && !file) { ctx.setError("Please upload a PDF first."); return; }
-    if (tab === "image" && !file) { ctx.setError("Please upload an image first."); return; }
-    if (tab === "text" && !text.trim()) { ctx.setError("Please paste some text first."); return; }
-    if (tab === "url" && !urlVal.trim()) { ctx.setError("Please enter a URL first."); return; }
-    if (tab === "youtube" && !ytVal.trim()) { ctx.setError("Please enter a YouTube URL first."); return; }
-    if (tab === "topic" && !topicVal.trim()) { ctx.setError("Please enter a topic first."); return; }
+    setError("");
+    if (tab === "pdf" && !file) { setError("Please upload a PDF first."); return; }
+    if (tab === "image" && !file) { setError("Please upload an image first."); return; }
+    if (tab === "text" && !text.trim()) { setError("Please paste some text first."); return; }
+    if (tab === "url" && !urlVal.trim()) { setError("Please enter a URL first."); return; }
+    if (tab === "youtube" && !ytVal.trim()) { setError("Please enter a YouTube URL first."); return; }
+    if (tab === "topic" && !topicVal.trim()) { setError("Please enter a topic first."); return; }
 
     setIsGenerating(true);
     const warmupTimer = setTimeout(() => setGenStatus("Warming up AI model — this may take up to 30s..."), 8000);
@@ -162,7 +177,6 @@ export default function HomePage() {
         blocks.push({ type: "text", text: `Read ALL text in these PDF pages and generate exactly ${numQ} quiz questions from it. ${typeInstr} ${langNote} ${jsonInstr}` });
         messages = [systemMsg, { role: "user", content: blocks }];
       } else if (tab === "url") {
-        // Actually fetch the URL content via a CORS proxy
         let pageText = null;
         const proxies = [
           `https://api.allorigins.win/get?url=${encodeURIComponent(urlVal)}`,
@@ -204,7 +218,6 @@ export default function HomePage() {
         let debugLog = [];
         const log = (msg) => { debugLog.push(msg); setYtStatus([...debugLog].join("\n")); };
 
-        // Try fetching transcript - works on Vercel, shows error on localhost
         log(`Host: ${window.location.hostname}`);
         log(`VideoID: ${videoId}`);
 
@@ -226,7 +239,6 @@ export default function HomePage() {
           log(`API exception: ${e.message} (on localhost this is expected - deploy to Vercel for transcripts)`);
         }
 
-        // If transcript failed or local, use multiple proxies to fetch YouTube page
         if (!transcriptText) {
           const proxiesToTry = [
             `https://api.allorigins.win/get?url=${encodeURIComponent("https://www.youtube.com/watch?v=" + videoId)}`,
@@ -265,7 +277,6 @@ export default function HomePage() {
           }
         }
 
-        // Update final status
         setYtStatus(debugLog.join("\n"));
 
         let ytPrompt;
@@ -281,19 +292,17 @@ export default function HomePage() {
         const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} quiz questions about: <content>${topicVal}</content>\n${typeInstr} ${langNote} ${jsonInstr}` }], numQ > 25 ? 8000 : 4000);
         await startQuiz(parseQuestions(raw)); return;
       } else {
-        // text tab — use HF with Groq fallback
         const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}\n\n<content>\n${text.trim().substring(0, 4000)}\n</content>` }]);
         await startQuiz(parseQuestions(raw)); return;
       }
 
-      // image / pdf — vision model, Groq only
       const raw = await groq(messages, model);
       await startQuiz(parseQuestions(raw));
     } catch (e) {
       console.error("Generate error:", e);
       const msg = e.message || "Something went wrong. Please try again.";
-      if (ctx.tab === "youtube") setYtStatus(prev => prev + "\nFATAL ERROR: " + msg);
-      ctx.setError(msg);
+      if (tab === "youtube") setYtStatus(prev => prev + "\nFATAL ERROR: " + msg);
+      setError(msg);
       setIsGenerating(false);
       setShowSettings(true);
     } finally {
@@ -304,62 +313,62 @@ export default function HomePage() {
   };
 
   const hostGame = async () => {
-    const name = ctx.playerName?.trim() || "Host";
+    const name = playerName?.trim() || "Host";
     try {
-      ctx.setMpError("");
-      const code = await createRoom(ctx.questions, name);
+      setMpError("");
+      const code = await createRoom(questions, name);
       const listener = new FirebaseListener(`/rooms/${code}/players`, (players) => {
         if (players && typeof players === "object") {
           const arr = Object.values(players).sort((a, b) => (b.score || 0) - (a.score || 0));
-          ctx.setMpPlayers(arr);
+          setMpPlayers(arr);
         }
       });
       listener.connect();
-      ctx.mpRealtimeRef.current = listener;
-      ctx.setMpCode(code);
-      ctx.setMpMode("host");
-      ctx.setMpPlayers([{ name, score: 0 }]);
-      ctx.setMyMpName(name);
-      ctx.navigate("multiplayer");
+      mpRealtimeRef.current = listener;
+      setMpCode(code);
+      setMpMode("host");
+      setMpPlayers([{ name, score: 0 }]);
+      setMyMpName(name);
+      navigate("multiplayer");
     } catch (e) {
-      ctx.setMpError("Failed to create room: " + e.message);
+      setMpError("Failed to create room: " + e.message);
     }
   };
 
   const joinGame = async () => {
-    const code = ctx.mpJoinCode?.trim().toUpperCase();
-    const name = ctx.playerName?.trim() || "Player";
-    if (!code || code.length !== 4) return ctx.setMpError("Enter a valid 4-letter room code.");
+    const code = mpJoinCode?.trim().toUpperCase();
+    const name = playerName?.trim() || "Player";
+    if (!code || code.length !== 4) return setMpError("Enter a valid 4-letter room code.");
     try {
-      ctx.setMpError("");
+      setMpError("");
       const room = await joinRoom(code, name);
       const assignedName = room.assignedName || name;
       const players = room.players ? Object.values(room.players) : [];
-      if (room.questions?.length) ctx.setQuestions(room.questions);
-      ctx.setMpSyncMode(room.syncMode || "self");
+      if (room.questions?.length) setQuestions(room.questions);
+      setMpSyncMode(room.syncMode || "self");
       const listener = new FirebaseListener(`/rooms/${code}/players`, (ps) => {
         if (ps && typeof ps === "object") {
           const arr = Object.values(ps).sort((a, b) => (b.score || 0) - (a.score || 0));
-          ctx.setMpPlayers(arr);
+          setMpPlayers(arr);
         }
       });
       listener.connect();
-      ctx.mpRealtimeRef.current = listener;
-      ctx.setMpCode(code);
-      ctx.setMpMode("join");
-      ctx.setMpPlayers(players);
-      ctx.setMyMpName(assignedName);
-      ctx.navigate("multiplayer");
+      mpRealtimeRef.current = listener;
+      setMpCode(code);
+      setMpMode("join");
+      setMpPlayers(players);
+      setMyMpName(assignedName);
+      navigate("multiplayer");
     } catch (e) {
-      ctx.setMpError("Failed to join: " + e.message);
+      setMpError("Failed to join: " + e.message);
     }
-  }
-  const genDisabled = ["pdf", "image"].includes(ctx.tab) && !ctx.file;
+  };
+
+  const genDisabled = ["pdf", "image"].includes(tab) && !file;
 
   return (
     <div className="page" style={{ maxWidth: 620, paddingTop: 72 }}>
 
-      {/* ── SUCCESS SCREEN ── */}
       {generated && !showSettings ? (
         <>
           <div style={{ textAlign: "center", padding: "60px 0 40px" }}>
@@ -373,7 +382,7 @@ export default function HomePage() {
             <p style={{ opacity: 0.5, fontSize: 14, marginBottom: 32 }}>{generated.length} questions ready</p>
             <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
               <button className="btn-primary" style={{ padding: "12px 32px", fontSize: 15 }}
-                onClick={() => { ctx.navigate("edit"); }}>
+                onClick={() => { navigate("edit"); }}>
                 Review & Start
               </button>
               <button className="btn-secondary" style={{ padding: "12px 20px" }}
@@ -382,8 +391,8 @@ export default function HomePage() {
               </button>
               <button className="btn-secondary" style={{ padding: "12px 20px" }}
                 onClick={async () => {
-                  const topic = ctx.topicVal || ctx.file?.name || ctx.urlVal || ctx.ytVal || "Shared Quiz";
-                  await shareQuizPublicly(generated, topic, ctx.playerName || "Anonymous");
+                  const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
+                  await shareQuizPublicly(generated, topic, playerName || "Anonymous");
                   setShared(true);
                 }}>
                 {shared ? "Shared!" : "Share Publicly"}
@@ -393,91 +402,85 @@ export default function HomePage() {
 
           <hr className="section-divider" />
 
-          {/* Quick join on success screen too */}
           <div className="card">
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Join a game</div>
             <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>Enter a room code to join a friend</div>
             <div style={{ display: "flex", gap: 8 }}>
               <input className="field-input" placeholder="Enter code" maxLength={4}
-                value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
+                value={mpJoinCode} onChange={e => setMpJoinCode(e.target.value.toUpperCase())}
                 style={{ letterSpacing: 4, fontWeight: 700, textAlign: "center", flex: 1 }} />
               <button className="btn-primary" onClick={joinGame}>Join</button>
             </div>
-            {ctx.mpError && <div className="alert-error" style={{ marginTop: 10 }}>{ctx.mpError}</div>}
+            {mpError && <div className="alert-error" style={{ marginTop: 10 }}>{mpError}</div>}
           </div>
         </>
 
       ) : !showSettings ? (
-        /* ── PAGE 1: INPUT ── */
         <>
           <div className="home-hero">
             <h1 className="home-title">Turn any content<br />into a quiz.</h1>
             <p className="home-sub">PDF · image · text · URL · YouTube · topic</p>
           </div>
 
-          {/* Mode selector */}
           <div className="home-modes">
             {MODES.map(m => (
-              <div key={m.id} className={`mode-card ${ctx.mode === m.id ? "active" : ""}`} onClick={() => ctx.setMode(m.id)}>
-                <div style={{ marginBottom: 10, opacity: ctx.mode === m.id ? 1 : 0.5 }}>{m.icon}</div>
+              <div key={m.id} className={`mode-card ${mode === m.id ? "active" : ""}`} onClick={() => setMode(m.id)}>
+                <div style={{ marginBottom: 10, opacity: mode === m.id ? 1 : 0.5 }}>{m.icon}</div>
                 <div className="mode-card-title">{m.label}</div>
                 <div className="mode-card-desc">{m.desc}</div>
               </div>
             ))}
           </div>
 
-          {/* Input tabs */}
           <div className="tabs" style={{ marginBottom: 16 }}>
             {TABS.map(([t, label]) => (
-              <button key={t} className={`tab-btn ${ctx.tab === t ? "active" : ""}`}
-                onClick={() => { ctx.setTab(t); ctx.setFile(null); }}>
+              <button key={t} className={`tab-btn ${tab === t ? "active" : ""}`}
+                onClick={() => { setTab(t); setFile(null); }}>
                 {label}
               </button>
             ))}
           </div>
 
-          {/* Input area */}
-          {(ctx.tab === "pdf" || ctx.tab === "image") && (
+          {(tab === "pdf" || tab === "image") && (
             <div className={`drop-zone ${drag ? "drag-over" : ""}`}
               onDragOver={e => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
-              onDrop={e => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) ctx.setFile(e.dataTransfer.files[0]); }}>
-              <input type="file" accept={ctx.tab === "pdf" ? ".pdf" : "image/*"} onChange={e => e.target.files[0] && ctx.setFile(e.target.files[0])} />
-              <div className="drop-label">Drop your {ctx.tab === "pdf" ? "PDF" : "image"} here</div>
+              onDrop={e => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); }}>
+              <input type="file" accept={tab === "pdf" ? ".pdf" : "image/*"} onChange={e => e.target.files[0] && setFile(e.target.files[0])} />
+              <div className="drop-label">Drop your {tab === "pdf" ? "PDF" : "image"} here</div>
               <div className="drop-hint">or click to browse</div>
-              {ctx.file && <div className="drop-file-name">{ctx.file.name}</div>}
+              {file && <div className="drop-file-name">{file.name}</div>}
             </div>
           )}
-          {ctx.tab === "text" && (
+          {tab === "text" && (
             <textarea className="text-area" placeholder="Paste your notes, article, or any text here..."
-              value={ctx.text} onChange={e => ctx.setText(e.target.value)} />
+              value={text} onChange={e => setText(e.target.value)} />
           )}
-          {ctx.tab === "url" && (
+          {tab === "url" && (
             <input className="field-input" placeholder="https://example.com/article"
-              value={ctx.urlVal} onChange={e => ctx.setUrlVal(e.target.value)} />
+              value={urlVal} onChange={e => setUrlVal(e.target.value)} />
           )}
-          {ctx.tab === "youtube" && (
+          {tab === "youtube" && (
             <input className="field-input" placeholder="https://youtube.com/watch?v=..."
-              value={ctx.ytVal} onChange={e => { ctx.setYtVal(e.target.value); setYtStatus(""); }} />
+              value={ytVal} onChange={e => { setYtVal(e.target.value); setYtStatus(""); }} />
           )}
-          {ctx.tab === "topic" && (
+          {tab === "topic" && (
             <input className="field-input" style={{ fontSize: 15, padding: "13px 16px" }}
               placeholder="e.g. World War 2, Photosynthesis, Python basics..."
-              value={ctx.topicVal} onChange={e => ctx.setTopicVal(e.target.value)}
+              value={topicVal} onChange={e => setTopicVal(e.target.value)}
               onKeyDown={e => e.key === "Enter" && !genDisabled && setShowSettings(true)} />
           )}
 
-          {ctx.error && <div className="alert-error" style={{ marginTop: 16 }}>{ctx.error}</div>}
+          {error && <div className="alert-error" style={{ marginTop: 16 }}>{error}</div>}
 
-          {/* Action buttons */}
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button className="btn-primary" style={{ flex: 1, padding: "13px" }}
-              onClick={() => { ctx.setError(""); if (!genDisabled) setShowSettings(true); }}
+              onClick={() => { setError(""); if (!genDisabled) setShowSettings(true); }}
               disabled={genDisabled}>
               Continue
             </button>
             <button className="btn-secondary" style={{ padding: "13px 18px" }}
-              onClick={() => { ctx.setError(""); if (!genDisabled) generate(); }}
+              onClick={() => { setError(""); if (!genDisabled) generate(); }}
               disabled={genDisabled} title="Generate with current settings">
               Quick Generate
             </button>
@@ -488,39 +491,37 @@ export default function HomePage() {
 
           <hr className="section-divider" />
 
-          {/* Join a game — on landing page */}
           <div className="card">
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Join a game</div>
             <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>Enter a room code from your host</div>
             <div style={{ display: "flex", gap: 8 }}>
               <input className="field-input" placeholder="Enter code" maxLength={4}
-                value={ctx.mpJoinCode} onChange={e => ctx.setMpJoinCode(e.target.value.toUpperCase())}
+                value={mpJoinCode} onChange={e => setMpJoinCode(e.target.value.toUpperCase())}
                 style={{ letterSpacing: 4, fontWeight: 700, textAlign: "center", flex: 1 }} />
               <button className="btn-primary" onClick={joinGame}>Join</button>
             </div>
-            {ctx.mpError && <div className="alert-error" style={{ marginTop: 10 }}>{ctx.mpError}</div>}
+            {mpError && <div className="alert-error" style={{ marginTop: 10 }}>{mpError}</div>}
           </div>
         </>
 
       ) : (
-        /* ── PAGE 2: SETTINGS ── */
         <>
           <button className="back-btn" onClick={() => setShowSettings(false)}>Back</button>
           <div className="page-heading">Settings</div>
-          <div className="page-sub">Customize your {ctx.mode === "study" ? "study guide" : ctx.mode === "flashcard" ? "flashcards" : "quiz"}</div>
+          <div className="page-sub">Customize your {mode === "study" ? "study guide" : mode === "flashcard" ? "flashcards" : "quiz"}</div>
 
           <div className="card">
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
               <div>
                 <label className="field-label">Questions</label>
-                <select className="field-select" value={ctx.numQ} onChange={e => ctx.setNumQ(Number(e.target.value))}>
+                <select className="field-select" value={numQ} onChange={e => setNumQ(Number(e.target.value))}>
                   {[5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
-              {ctx.mode !== "study" && (
+              {mode !== "study" && (
                 <div>
                   <label className="field-label">Type</label>
-                  <select className="field-select" value={ctx.qType} onChange={e => ctx.setQType(e.target.value)}>
+                  <select className="field-select" value={qType} onChange={e => setQType(e.target.value)}>
                     <option value="mixed">Mixed</option>
                     <option value="mcq">Multiple Choice</option>
                     <option value="tf">True / False</option>
@@ -530,32 +531,30 @@ export default function HomePage() {
               )}
               <div>
                 <label className="field-label">Language</label>
-                <select className="field-select" value={ctx.lang} onChange={e => ctx.setLang(e.target.value)}>
+                <select className="field-select" value={lang} onChange={e => setLang(e.target.value)}>
                   {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
                 </select>
               </div>
               <div>
                 <label className="field-label">Your Name</label>
                 <input className="field-input" style={{ width: 140 }} placeholder="e.g. Alex"
-                  value={ctx.playerName} onChange={e => ctx.setPlayerName(e.target.value)} />
+                  value={playerName} onChange={e => setPlayerName(e.target.value)} />
               </div>
             </div>
-            {ctx.mode === "quiz" && (
+            {mode === "quiz" && (
               <div className="toggles-row">
-                <Toggle on={ctx.useTimer} onChange={ctx.setUseTimer} label="Timer (30s)" />
-                <Toggle on={ctx.useStreak} onChange={ctx.setUseStreak} label="Streak" />
-                <Toggle on={ctx.useSounds} onChange={ctx.setUseSounds} label="Sounds" />
-                {ctx.tab === "topic" && <Toggle on={ctx.autoDiff} onChange={ctx.setAutoDiff} label="Auto-difficulty" />}
-                <Toggle on={ctx.mpAfterGenerate} onChange={ctx.setMpAfterGenerate} label="Host room after generate" />
+                <Toggle on={useTimer} onChange={setUseTimer} label="Timer (30s)" />
+                <Toggle on={useStreak} onChange={setUseStreak} label="Streak" />
+                <Toggle on={useSounds} onChange={setUseSounds} label="Sounds" />
+                {tab === "topic" && <Toggle on={autoDiff} onChange={setAutoDiff} label="Auto-difficulty" />}
+                <Toggle on={mpAfterGenerate} onChange={setMpAfterGenerate} label="Host room after generate" />
               </div>
             )}
           </div>
 
-          {ctx.error && <div className="alert-error">{ctx.error}</div>}
+          {error && <div className="alert-error">{error}</div>}
 
-          {/* Two action buttons side by side */}
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-            {/* Generate */}
             <div style={{
               flex: 1, border: "1px solid var(--bdr,#3e3e3e)", borderRadius: 10,
               padding: "16px", display: "flex", flexDirection: "column", gap: 10,
@@ -587,8 +586,8 @@ export default function HomePage() {
               {generated && (
                 <button className="btn-secondary" style={{ width: "100%", padding: "8px", fontSize: 12 }}
                   onClick={async () => {
-                    const topic = ctx.topicVal || ctx.file?.name || ctx.urlVal || ctx.ytVal || "Shared Quiz";
-                    await shareQuizPublicly(generated, topic, ctx.playerName || "Anonymous");
+                    const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
+                    await shareQuizPublicly(generated, topic, playerName || "Anonymous");
                     setShared(true);
                   }}>
                   {shared ? "Shared!" : "Share to Find Page"}
@@ -596,7 +595,6 @@ export default function HomePage() {
               )}
             </div>
 
-            {/* Start */}
             <div style={{
               flex: 1, border: `1px solid ${generated ? "var(--bdr2,#686868)" : "var(--bdr,#3e3e3e)"}`, borderRadius: 10,
               padding: "16px", display: "flex", flexDirection: "column", gap: 10,
@@ -614,20 +612,19 @@ export default function HomePage() {
               </p>
               <button className="btn-primary" style={{ width: "100%", padding: "10px" }}
                 disabled={!generated}
-                onClick={() => { if (generated) ctx.navigate("edit"); }}>
+                onClick={() => { if (generated) navigate("edit"); }}>
                 Review & Start
               </button>
             </div>
           </div>
 
-          {/* Share Publicly button — shown after generating */}
           {generated && (
             <button
               className="btn-secondary"
               style={{ width: "100%", marginTop: 10, padding: "11px" }}
               onClick={async () => {
-                if (!user) { ctx.setError("Please sign in to share quizzes publicly."); return; }
-                const topic = ctx.topicVal || ctx.file?.name || ctx.urlVal || ctx.ytVal || "Shared Quiz";
+                if (!user) { setError("Please sign in to share quizzes publicly."); return; }
+                const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
                 await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous");
                 setShared(true);
               }}
@@ -638,19 +635,17 @@ export default function HomePage() {
 
           <hr className="section-divider" />
 
-          {/* Multiplayer — host */}
           <div className="card" style={{ marginBottom: 12 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Host a game</div>
             <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>Generate a quiz first, then create a room for others to join</div>
-            {ctx.mpError && <div className="alert-error" style={{ marginBottom: 12 }}>{ctx.mpError}</div>}
-            <button className="btn-secondary" style={{ width: "100%", opacity: ctx.questions.length > 0 ? 1 : 0.4 }}
-              onClick={ctx.questions.length > 0 ? hostGame : () => ctx.setError("Generate a quiz first.")}
-              disabled={ctx.questions.length === 0}>
-              {ctx.questions.length > 0 ? `Create Room (${ctx.questions.length} questions)` : "Generate a quiz first"}
+            {mpError && <div className="alert-error" style={{ marginBottom: 12 }}>{mpError}</div>}
+            <button className="btn-secondary" style={{ width: "100%", opacity: questions.length > 0 ? 1 : 0.4 }}
+              onClick={questions.length > 0 ? hostGame : () => setError("Generate a quiz first.")}
+              disabled={questions.length === 0}>
+              {questions.length > 0 ? `Create Room (${questions.length} questions)` : "Generate a quiz first"}
             </button>
           </div>
 
-          {/* Manual Questions */}
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
             <div style={{
               padding: "14px 20px", fontSize: 14, fontWeight: 700,

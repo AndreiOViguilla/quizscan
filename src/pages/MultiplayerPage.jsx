@@ -1,14 +1,17 @@
 import { useEffect } from "react";
 import { useApp } from "../context/AppContext";
+import { useQuiz } from "../context/QuizContext";
+import { useMultiplayer } from "../context/MultiplayerContext";
 import { pingRoom, setRoomSyncMode } from "../utils/api";
 
 export default function MultiplayerPage() {
-  const ctx = useApp();
+  const { navigate } = useApp();
+  const { questions, resetQuizState, quizStartTime } = useQuiz();
   const {
-    mpCode, mpMode, mpPlayers, myMpName, mpStatus, mpError, navigate, questions,
+    mpCode, mpMode, mpPlayers, myMpName, mpStatus, mpError,
     mpRealtimeRef, setMpMode, setMpPlayers, setMpCode, setMpStatus, setMpError,
-    resetQuizState, quizStartTime, mpSyncMode, setMpSyncMode,
-  } = ctx;
+    mpSyncMode, setMpSyncMode, myPlayerIdRef,
+  } = useMultiplayer();
 
   useEffect(() => {
     if (!mpCode) return;
@@ -31,7 +34,7 @@ export default function MultiplayerPage() {
     if (mpRealtimeRef.current) { mpRealtimeRef.current.disconnect(); mpRealtimeRef.current = null; }
     setMpMode(""); setMpPlayers([]); setMpCode(""); setMpStatus(""); setMpError("");
     setMpSyncMode("self");
-    ctx.myPlayerIdRef.current = null;
+    myPlayerIdRef.current = null;
     navigate("home");
   };
 
@@ -49,7 +52,6 @@ export default function MultiplayerPage() {
       </div>
       {mpError && <div className="alert-error">! {mpError}</div>}
 
-      {/* Sync mode toggle — host only */}
       {isHost && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--txt2)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
@@ -88,14 +90,12 @@ export default function MultiplayerPage() {
         </div>
       )}
 
-      {/* Guest: show the selected sync mode */}
       {!isHost && (
         <div className="badge" style={{ marginBottom: 20, display: "inline-flex" }}>
           {mpSyncMode === "host" ? "Host controls pace" : "Self-paced"}
         </div>
       )}
 
-      {/* Players list */}
       <div style={{ marginBottom: 20 }}>
         {mpPlayers.map((p, i) => (
           <div key={i} className="mp-player-row">

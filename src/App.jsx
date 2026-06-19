@@ -1,5 +1,8 @@
 import { useEffect } from "react";
 import { AppProvider, useApp } from "./context/AppContext";
+import { SettingsProvider } from "./context/SettingsContext";
+import { QuizProvider } from "./context/QuizContext";
+import { MultiplayerProvider } from "./context/MultiplayerContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { cleanupExpiredRooms } from "./utils/api";
 import { makeGlobalStyles } from "./styles/theme";
@@ -66,7 +69,6 @@ function Toast() {
   );
 }
 
-// Signs out after 30 min of no mouse/keyboard/touch activity
 function IdleLogout() {
   const { user, signOut } = useAuth();
 
@@ -93,7 +95,6 @@ function IdleLogout() {
 function InnerApp() {
   const { dark, confetti, page } = useApp();
 
-  // Clean up expired rooms on load
   useEffect(() => { cleanupExpiredRooms(); }, []);
 
   useEffect(() => {
@@ -126,8 +127,14 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <AppProvider>
-          <IdleLogout />
-          <InnerApp />
+          <SettingsProvider>
+            <QuizProvider>
+              <MultiplayerProvider>
+                <IdleLogout />
+                <InnerApp />
+              </MultiplayerProvider>
+            </QuizProvider>
+          </SettingsProvider>
         </AppProvider>
       </AuthProvider>
     </ErrorBoundary>

@@ -1,7 +1,7 @@
-import { useApp } from "../context/AppContext";
+import { useSettings } from "../context/SettingsContext";
 
 export default function LoadingPage() {
-  const { tab } = useApp();
+  const { tab } = useSettings();
   const hints = {
     pdf: "Reading your PDF pages...",
     image: "Scanning image content...",

@@ -1,10 +1,14 @@
 import { useApp } from "../context/AppContext";
+import { useSettings } from "../context/SettingsContext";
+import { useQuiz } from "../context/QuizContext";
 import { BackButton } from "../components/Layout";
 import { playSound } from "../utils/sounds";
 
 export default function FlashcardPage() {
-  const ctx = useApp();
-  const { questions, setQuestions, current, setCurrent, flipped, setFlipped, fcKnown, setFcKnown, useSounds, navigate, dark } = ctx;
+  const { navigate, dark } = useApp();
+  const { useSounds } = useSettings();
+  const { questions, setQuestions, current, setCurrent, flipped, setFlipped, fcKnown, setFcKnown } = useQuiz();
+
   const fc = questions[current] || {};
   const isDone = current >= questions.length;
   const getAns = q => q.type === "mcq" ? (q.choices?.[q.answer] || "") : String(q.answer || "");

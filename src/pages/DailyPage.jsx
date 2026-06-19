@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useApp } from "../context/AppContext";
+import { useQuiz } from "../context/QuizContext";
 import { BackButton } from "../components/Layout";
 import { getDailyChallenge, getDailyScores, submitDailyScore } from "../utils/db";
 import { groq, parseQuestions } from "../utils/api";
@@ -13,7 +14,8 @@ const DAILY_TOPIC_SEED = () => {
 
 export default function DailyPage() {
   const { user } = useAuth();
-  const ctx = useApp();
+  const { navigate } = useApp();
+  const { setQuestions, resetQuizState, quizStartTime } = useQuiz();
   const [challenge, setChallenge] = useState(null);
   const [scores, setScores] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -38,10 +40,10 @@ export default function DailyPage() {
 
   const startChallenge = () => {
     if (!challenge?.questions) return;
-    ctx.setQuestions(challenge.questions);
-    ctx.resetQuizState();
-    ctx.quizStartTime.current = Date.now();
-    ctx.navigate("quiz");
+    setQuestions(challenge.questions);
+    resetQuizState();
+    quizStartTime.current = Date.now();
+    navigate("quiz");
   };
 
   return (
@@ -81,7 +83,6 @@ export default function DailyPage() {
             )}
           </div>
 
-          {/* Leaderboard */}
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Today's Scores</div>
           {scores.length === 0 ? (
             <div className="card" style={{ opacity: 0.5, fontSize: 13, textAlign: "center" }}>

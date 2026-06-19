@@ -1,4 +1,7 @@
 import { useApp } from "../context/AppContext";
+import { useSettings } from "../context/SettingsContext";
+import { useQuiz } from "../context/QuizContext";
+import { useMultiplayer } from "../context/MultiplayerContext";
 import { BackButton } from "../components/Layout";
 import { LETTERS } from "../utils/constants";
 import { createRoom, FirebaseListener } from "../utils/api";
@@ -13,12 +16,10 @@ function Toggle({ on, onToggle, label }) {
 }
 
 export default function EditPage() {
-  const ctx = useApp();
-  const {
-    questions, setQuestions, navigate, resetQuizState, quizStartTime,
-    useShuffleQ, setUseShuffleQ, useShuffleChoices, setUseShuffleChoices,
-    gameMode, setGameMode,
-  } = ctx;
+  const { navigate } = useApp();
+  const { useShuffleQ, setUseShuffleQ, useShuffleChoices, setUseShuffleChoices, gameMode, setGameMode, playerName } = useSettings();
+  const { questions, setQuestions, resetQuizState, quizStartTime } = useQuiz();
+  const { setMyMpName, setMpStatus, setMpCode, setMpPlayers, setMpMode, myPlayerIdRef, mpRealtimeRef, setMpError } = useMultiplayer();
 
   const startQuiz = () => {
     resetQuizState();
@@ -37,27 +38,27 @@ export default function EditPage() {
   };
 
   const hostRoom = async () => {
-    const name = ctx.playerName || "Host";
-    ctx.setMyMpName(name);
-    ctx.setMpStatus("Creating room...");
+    const name = playerName || "Host";
+    setMyMpName(name);
+    setMpStatus("Creating room...");
     try {
-      const code = await createRoom(ctx.questions, name);
-      ctx.myPlayerIdRef.current = name;
-      ctx.setMpCode(code);
-      ctx.setMpPlayers([{ name, score: 0, isHost: true }]);
-      ctx.setMpMode("host");
-      ctx.setMpStatus("Waiting for players...");
+      const code = await createRoom(questions, name);
+      myPlayerIdRef.current = name;
+      setMpCode(code);
+      setMpPlayers([{ name, score: 0, isHost: true }]);
+      setMpMode("host");
+      setMpStatus("Waiting for players...");
       const rt = new FirebaseListener(`/rooms/${code}/players`, (players) => {
         if (players) {
           const list = Object.values(players);
-          ctx.setMpPlayers(list.map((p, i) => ({ ...p, isHost: i === 0 })));
+          setMpPlayers(list.map((p, i) => ({ ...p, isHost: i === 0 })));
         }
       });
       rt.connect();
-      ctx.mpRealtimeRef.current = rt;
+      mpRealtimeRef.current = rt;
       navigate("multiplayer");
     } catch (e) {
-      ctx.setMpError(`Failed to create room: ${e.message}`);
+      setMpError(`Failed to create room: ${e.message}`);
     }
   };
 
@@ -73,17 +74,14 @@ export default function EditPage() {
       <h2 className="page-heading">Review & Edit Questions</h2>
       <p className="page-sub">// fix any AI mistakes before starting — click any field to edit</p>
 
-      {/* Quiz Settings */}
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 14 }}>Quiz Settings</div>
 
-        {/* Shuffle toggles */}
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 18 }}>
           <Toggle on={useShuffleQ} onToggle={() => setUseShuffleQ(v => !v)} label="Shuffle Questions" />
           <Toggle on={useShuffleChoices} onToggle={() => setUseShuffleChoices(v => !v)} label="Shuffle Choices" />
         </div>
 
-        {/* Game mode */}
         <div style={{ fontSize: 11, fontWeight: 600, color: "var(--txt2)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
           Game Mode
         </div>
@@ -102,7 +100,6 @@ export default function EditPage() {
         </div>
       </div>
 
-      {/* Question list */}
       {questions.map((q, qi) => (
         <div key={qi} className="edit-q-card">
           <div className="edit-q-num">Question {qi + 1} · {q.type.toUpperCase()}</div>

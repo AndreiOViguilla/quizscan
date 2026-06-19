@@ -1,8 +1,13 @@
 import { useApp } from "../context/AppContext";
+import { useSettings } from "../context/SettingsContext";
+import { useQuiz } from "../context/QuizContext";
 import { BackButton } from "../components/Layout";
 
 export default function StudyPage() {
-  const { questions, navigate, resetQuizState, quizStartTime, setMode } = useApp();
+  const { navigate } = useApp();
+  const { setMode } = useSettings();
+  const { questions, resetQuizState, quizStartTime } = useQuiz();
+
   return (
     <div className="page">
       <BackButton to="home" />

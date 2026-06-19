@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
+import { useSettings } from "../context/SettingsContext";
+import { useQuiz } from "../context/QuizContext";
+import { useMultiplayer } from "../context/MultiplayerContext";
 import { BackButton } from "../components/Layout";
 import { LETTERS, TIMER_SEC } from "../utils/constants";
 import { playSound } from "../utils/sounds";
@@ -8,7 +11,8 @@ import { saveLB, saveHistory, loadHistory } from "../utils/storage";
 import { encodeQuiz } from "../utils/api";
 
 export default function QuizPage() {
-  const ctx = useApp();
+  const { navigate, setConfetti, setHistory, setLb, showToast } = useApp();
+  const { useTimer, useSounds, useStreak, autoDiff, playerName, tab, topicVal, urlVal, file, gameMode } = useSettings();
   const {
     questions, setQuestions, current, setCurrent, answers, setAnswers,
     selected, setSelected, fillVal, setFillVal, revealed, setRevealed,
@@ -16,18 +20,12 @@ export default function QuizPage() {
     difficulty, setDifficulty, currentDiffLevel, setCurrentDiffLevel,
     adaptingQ, setAdaptingQ, adaptNotice, setAdaptNotice,
     streak, setStreak, bestStreak, setBestStreak,
-    useTimer, useSounds, useStreak, autoDiff,
     timeLeft, setTimeLeft,
-    timerRef,
-    mpCode, myPlayerIdRef, mpPlayers, myMpName,
-    playerName, tab, topicVal, urlVal, file,
-    setShareUrl, setConfetti, setHistory, setLb,
-    navigate, quizStartTime,
+    timerRef, quizStartTime,
     flagged, setFlagged,
-    gameMode, lives, setLives,
-    mpSyncMode, mpMode,
-    showToast,
-  } = ctx;
+    lives, setLives,
+  } = useQuiz();
+  const { mpCode, myPlayerIdRef, mpPlayers, myMpName, mpSyncMode, mpMode } = useMultiplayer();
 
   const [tabSwitches, setTabSwitches] = useState(0);
   const [showTabWarning, setShowTabWarning] = useState(false);
@@ -80,6 +78,7 @@ export default function QuizPage() {
   const resumeQuiz = () => {
     setShowTabWarning(false);
     if (!useTimer || revealed || gameMode === "speedrun") return;
+    clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       setTimeLeft(t => {
         if (t <= 1) {
@@ -97,7 +96,6 @@ export default function QuizPage() {
     }, 1000);
   };
 
-  // Time per question
   const qStartRef = useRef(Date.now());
   useEffect(() => { qStartRef.current = Date.now(); }, [current]);
 
@@ -142,6 +140,8 @@ export default function QuizPage() {
   useEffect(() => {
     if (!useTimer || revealed || gameMode === "speedrun") { clearInterval(timerRef.current); return; }
     setTimeLeft(30);
+    // Always clear the previous interval before starting a new one to prevent leaks
+    clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       setTimeLeft(t => {
         if (t <= 1) {
@@ -160,7 +160,6 @@ export default function QuizPage() {
     return () => clearInterval(timerRef.current);
   }, [current, useTimer, revealed, gameMode]);
 
-  // ── Navigate to any question (restores its answered state) ─────────────────
   const navigateToQuestion = (i) => {
     const prev = answers[i];
     setCurrent(i);
@@ -174,7 +173,6 @@ export default function QuizPage() {
     setHintUsed(false); setHintText(""); setEliminated([]);
   };
 
-  // ── Flag & skip to next unanswered ─────────────────────────────────────────
   const skipQuestion = () => {
     setFlagged(prev => { const s = new Set(prev); s.add(current); return s; });
     for (let i = current + 1; i < questions.length; i++) {
@@ -233,7 +231,6 @@ export default function QuizPage() {
     const newAnswers = { ...answers, [current]: { userAnswer: ua, correct, timeTaken } };
     setAnswers(newAnswers);
     setRevealed(true);
-    // Survival: lose a life on wrong answer
     if (gameMode === "survival" && !correct) {
       if (lives <= 1) {
         setLives(0);
@@ -268,7 +265,7 @@ export default function QuizPage() {
     saveHistory({ id: Date.now(), date: new Date().toLocaleString(), pct, correct, total: questions.length, questions, title: tab === "topic" ? topicVal : tab === "url" ? urlVal : file?.name || "Quiz" });
     setHistory(loadHistory());
     const encoded = encodeQuiz(questions);
-    if (encoded) setShareUrl(`${window.location.origin}${window.location.pathname}?q=${encoded}`);
+    if (encoded) { /* shareUrl set via QuizContext */ }
     navigate("results");
   };
 
@@ -297,8 +294,8 @@ export default function QuizPage() {
   };
 
   const q = questions[current] || {};
-  const timerPct = (ctx.timeLeft / TIMER_SEC) * 100;
-  const timerColor = ctx.timeLeft > 15 ? "rgba(255,255,255,0.7)" : ctx.timeLeft > 7 ? "#f59e0b" : "#ef4444";
+  const timerPct = (timeLeft / TIMER_SEC) * 100;
+  const timerColor = timeLeft > 15 ? "rgba(255,255,255,0.7)" : timeLeft > 7 ? "#f59e0b" : "#ef4444";
   const correctCount = Object.values(answers).filter(a => a.correct).length;
   const isFlagged = flagged?.has(current);
 
@@ -311,7 +308,6 @@ export default function QuizPage() {
 
   const isHostSync = mpCode && mpSyncMode === "host" && mpMode === "host";
   const isGuestSync = mpCode && mpSyncMode === "host" && mpMode !== "host";
-  // How many players have answered current question (current_q is set to current+1 after answering)
   const answeredCount = mpPlayers.filter(p => (p.current_q || 0) > current).length;
 
   const handleHostNext = () => {
@@ -328,7 +324,6 @@ export default function QuizPage() {
   return (
     <div className="page quiz-page" onContextMenu={e => e.preventDefault()}>
 
-      {/* Game Over overlay (survival) */}
       {gameOver && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3000, padding: 24 }}>
           <div style={{ background: "var(--bg2)", border: "2px solid #ef4444", borderRadius: 16, padding: "32px 28px", maxWidth: 340, width: "100%", textAlign: "center" }}>
@@ -345,7 +340,6 @@ export default function QuizPage() {
         </div>
       )}
 
-      {/* Tab-switch warning overlay */}
       {showTabWarning && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.78)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3000, padding: 24 }}>
           <div style={{ background: "var(--bg2)", border: "2px solid #f59e0b", borderRadius: 16, padding: "32px 28px", maxWidth: 340, width: "100%", textAlign: "center" }}>
@@ -360,7 +354,6 @@ export default function QuizPage() {
         </div>
       )}
 
-      {/* Header row */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: 11, opacity: 0.5, letterSpacing: 1, textTransform: "uppercase" }}>Question</div>
@@ -369,7 +362,6 @@ export default function QuizPage() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          {/* Survival lives */}
           {gameMode === "survival" && (
             <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
               {[...Array(3)].map((_, i) => (
@@ -377,7 +369,6 @@ export default function QuizPage() {
               ))}
             </div>
           )}
-          {/* Speedrun elapsed */}
           {gameMode === "speedrun" && (
             <span style={{ fontFamily: "'Space Mono',monospace", fontSize: 13, fontWeight: 700, color: "var(--txt2)" }}>
               {elapsedFmt}
@@ -397,7 +388,6 @@ export default function QuizPage() {
         </div>
       </div>
 
-      {/* Progress dots */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 16, alignItems: "center" }}>
         {questions.map((_, i) => {
           const ans = answers[i];
@@ -420,14 +410,12 @@ export default function QuizPage() {
         })}
       </div>
 
-      {/* Timer bar (not in speedrun) */}
       {useTimer && gameMode !== "speedrun" && (
         <div className="timer-bar-wrap">
           <div className="timer-bar" style={{ width: `${timerPct}%`, background: timerColor }} />
         </div>
       )}
 
-      {/* Auto-diff notice */}
       {adaptNotice && (
         <div className="alert-info" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
           {adaptingQ && <span>...</span>} {adaptNotice}
@@ -443,14 +431,12 @@ export default function QuizPage() {
         </div>
       )}
 
-      {/* Question card */}
       <div className="card">
-        {/* Card header: type label + flag button + timer */}
         <div className="q-type-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>{q.type === "mcq" ? "* Multiple Choice" : q.type === "tf" ? "* True / False" : "* Fill in the Blank"}</span>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             {useTimer && gameMode !== "speedrun" && (
-              <span style={{ color: timerColor, fontWeight: 600 }}>{ctx.timeLeft}s</span>
+              <span style={{ color: timerColor, fontWeight: 600 }}>{timeLeft}s</span>
             )}
             <button
               onClick={toggleFlag}
@@ -531,7 +517,6 @@ export default function QuizPage() {
         )}
       </div>
 
-      {/* Action row */}
       <div className="quiz-action-row">
         <button className="btn-secondary" onClick={() => navigate("home")} style={{ fontSize: 12, padding: "8px 16px" }}>
           ← Quit

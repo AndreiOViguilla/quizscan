@@ -46,7 +46,6 @@ export default function ProfilePage() {
     <div className="page" style={{ maxWidth: 680, paddingTop: 72 }}>
       <BackButton />
 
-      {/* Profile header */}
       <div className="card" style={{ display: "flex", gap: 20, alignItems: "center", marginBottom: 20 }}>
         {user.photoURL ? (
           <img src={user.photoURL} alt="" style={{ width: 64, height: 64, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
@@ -61,7 +60,6 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Stats */}
       <div className="stats-row" style={{ marginBottom: 20 }}>
         <div className="stat-box">
           <div className="stat-num">{profile?.plays || 0}</div>
@@ -81,7 +79,6 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Achievements */}
       <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Achievements</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
         {ACHIEVEMENTS.map(a => {
@@ -104,7 +101,6 @@ export default function ProfilePage() {
         })}
       </div>
 
-      {/* Streak calendar */}
       {(() => {
         const hData = loadHistory();
         const today = new Date();
@@ -152,7 +148,6 @@ export default function ProfilePage() {
         );
       })()}
 
-      {/* Shared quizzes */}
       <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Your Shared Quizzes</div>
       {loading ? (
         <div style={{ opacity: 0.4, fontSize: 13 }}>Loading...</div>
