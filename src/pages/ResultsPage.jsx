@@ -23,7 +23,7 @@ export default function ResultsPage() {
       quizzesDone: plays, sharedCount: shared, isDaily: false
     }).then(unlocked => { if (unlocked.length) setNewAchievements(unlocked); });
   }, []);
-  const { questions, answers, difficulty, bestStreak, useStreak, shareUrl, navigate, resetQuizState, quizStartTime, setAnswers, setStreak, setBestStreak, setRevealed, setSelected, setFillVal, setCurrent, setHintUsed, setHintText, setEliminated, setDifficulty, mode, setMode } = ctx;
+  const { questions, answers, difficulty, bestStreak, useStreak, shareUrl, navigate, resetQuizState, quizStartTime, setAnswers, setStreak, setBestStreak, setRevealed, setSelected, setFillVal, setCurrent, setHintUsed, setHintText, setEliminated, setDifficulty, mode, setMode, dark } = ctx;
   const [copied, setCopied] = useState(false);
 
   const correctCount = Object.values(answers).filter(a => a.correct).length;
@@ -87,8 +87,8 @@ export default function ResultsPage() {
       <div style={{ textAlign: "center", marginBottom: 32 }}>
         <div className="score-ring">
           <svg width="150" height="150" viewBox="0 0 150 150">
-            <circle cx="75" cy="75" r="68" fill="none" stroke="#0d2b0d" strokeWidth="7" />
-            <circle cx="75" cy="75" r="68" fill="none" stroke="#4caf50" strokeWidth="7"
+            <circle cx="75" cy="75" r="68" fill="none" stroke={dark ? "#3e3e3e" : "#e5e5e5"} strokeWidth="7" />
+            <circle cx="75" cy="75" r="68" fill="none" stroke={dark ? "#ececec" : "#0d0d0d"} strokeWidth="7"
               strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" />
           </svg>
           <div className="score-ring-center">
@@ -103,23 +103,23 @@ export default function ResultsPage() {
       </div>
 
       <div className="stats-row" style={{ marginBottom: 24 }}>
-        <div className="stat-box"><div className="stat-num" style={{ color: "#4caf50" }}>{correctCount}</div><div className="stat-lbl">Correct</div></div>
-        <div className="stat-box"><div className="stat-num" style={{ color: "#c62828" }}>{wrongCount}</div><div className="stat-lbl">Wrong</div></div>
+        <div className="stat-box"><div className="stat-num">{correctCount}</div><div className="stat-lbl">Correct</div></div>
+        <div className="stat-box"><div className="stat-num" style={{ color: "#ef4444" }}>{wrongCount}</div><div className="stat-lbl">Wrong</div></div>
         <div className="stat-box"><div className="stat-num">{questions.length}</div><div className="stat-lbl">Total</div></div>
         {useStreak && <div className="stat-box"><div className="stat-num" style={{ color: "#ff9800" }}>{bestStreak}</div><div className="stat-lbl">Best Streak</div></div>}
       </div>
 
       {(diffCounts.easy || diffCounts.medium || diffCounts.hard) > 0 && (
         <div style={{ display: "flex", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
-          {diffCounts.easy > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: "#0d2b0d", color: "#4caf50", border: "1px solid #4caf50", fontSize: 12, fontFamily: "'Space Mono',monospace" }}>Easy: {diffCounts.easy}</span>}
-          {diffCounts.medium > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: "#1a1000", color: "#ff9800", border: "1px solid #ff9800", fontSize: 12, fontFamily: "'Space Mono',monospace" }}>Medium: {diffCounts.medium}</span>}
-          {diffCounts.hard > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: "#1a0000", color: "#f44336", border: "1px solid #f44336", fontSize: 12, fontFamily: "'Space Mono',monospace" }}>Hard: {diffCounts.hard}</span>}
+          {diffCounts.easy > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: dark ? "#2f2f2f" : "#f0f0f0", color: dark ? "#b4b4b4" : "#444444", border: `1px solid ${dark ? "#4a4a4a" : "#e5e5e5"}`, fontSize: 12, fontFamily: "'Space Mono',monospace" }}>Easy: {diffCounts.easy}</span>}
+          {diffCounts.medium > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: dark ? "#1f1400" : "#fffbeb", color: "#f59e0b", border: "1px solid #f59e0b", fontSize: 12, fontFamily: "'Space Mono',monospace" }}>Medium: {diffCounts.medium}</span>}
+          {diffCounts.hard > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: dark ? "#2d1b1b" : "#fef2f2", color: "#ef4444", border: "1px solid #ef4444", fontSize: 12, fontFamily: "'Space Mono',monospace" }}>Hard: {diffCounts.hard}</span>}
         </div>
       )}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 32 }}>
         <button className="btn-primary" onClick={retryAll}>Retry All</button>
-        {wrongCount > 0 && <button className="btn-primary" style={{ background: "#ff9800" }} onClick={retryWrong}>Retry Wrong ({wrongCount})</button>}
+        {wrongCount > 0 && <button className="btn-secondary" onClick={retryWrong}>Retry Wrong ({wrongCount})</button>}
         <button className="btn-secondary" onClick={() => { setMode("flashcard"); navigate("flashcard"); }}>Flashcards</button>
         <button className="btn-secondary" onClick={() => { setMode("study"); navigate("study"); }}>Study</button>
         <button className="btn-secondary" onClick={exportPDF}>Export PDF</button>

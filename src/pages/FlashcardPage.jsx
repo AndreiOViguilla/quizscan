@@ -4,7 +4,7 @@ import { playSound } from "../utils/sounds";
 
 export default function FlashcardPage() {
   const ctx = useApp();
-  const { questions, setQuestions, current, setCurrent, flipped, setFlipped, fcKnown, setFcKnown, useSounds, navigate } = ctx;
+  const { questions, setQuestions, current, setCurrent, flipped, setFlipped, fcKnown, setFcKnown, useSounds, navigate, dark } = ctx;
   const fc = questions[current] || {};
   const isDone = current >= questions.length;
   const getAns = q => q.type === "mcq" ? (q.choices?.[q.answer] || "") : String(q.answer || "");
@@ -13,7 +13,7 @@ export default function FlashcardPage() {
     <div className="page">
       <BackButton to="home" />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 12, color: "#2e7d32", letterSpacing: 2 }}>
+        <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 12, color: dark ? "#b4b4b4" : "#444444", letterSpacing: 2 }}>
           CARD {Math.min(current + 1, questions.length)} / {questions.length}
         </div>
         <div className="badge">+ {fcKnown.size} known</div>
@@ -23,7 +23,7 @@ export default function FlashcardPage() {
       </div>
       {isDone ? (
         <div style={{ textAlign: "center", padding: "60px 0" }}>
-          <h2 className="page-heading" style={{ color: "#4caf50", fontSize: 36, marginBottom: 8 }}>
+          <h2 className="page-heading" style={{ fontSize: 36, marginBottom: 8 }}>
             {fcKnown.size === questions.length ? "Perfect!" : `${fcKnown.size} / ${questions.length} Known`}
           </h2>
           <p className="page-sub">// deck complete</p>
