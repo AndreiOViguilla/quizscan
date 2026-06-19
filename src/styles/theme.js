@@ -30,7 +30,10 @@ export function makeGlobalStyles(dark) {
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
     @keyframes bar-fill { 0%{width:0%} 100%{width:100%} }
     @keyframes slide-in { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes slide-down { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
     @keyframes fade-in { from{opacity:0} to{opacity:1} }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    .spinner { display:inline-block; width:14px; height:14px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; animation:spin .7s linear infinite; vertical-align:middle; margin-right:7px; }
     .quiz-page * { user-select: none; -webkit-user-select: none; }
     .quiz-page input, .quiz-page textarea { user-select: text; -webkit-user-select: text; }
     @keyframes skeleton-shimmer { 0%{opacity:.55} 50%{opacity:.25} 100%{opacity:.55} }
@@ -40,6 +43,7 @@ export function makeGlobalStyles(dark) {
     /* ── LAYOUT ── */
     .app { min-height: 100vh; background: ${v.bg}; display: flex; flex-direction: column; }
     .page { flex: 1; max-width: 760px; margin: 0 auto; width: 100%; padding: 72px 24px 48px; animation: slide-in .2s ease; }
+    @media (max-width: 480px) { .page { padding: 64px 14px 40px; } }
 
     /* ── NO HEADER - hidden ── */
     .header { display: none; }
@@ -61,16 +65,16 @@ export function makeGlobalStyles(dark) {
       transition: all .15s;
     }
     .topbar-btn:hover { background: ${v.bg3}; color: ${v.txt}; }
-    .topbar-btn.active { background: ${v.bg3}; color: ${v.txt}; }
+    .topbar-btn.active { background: ${v.bg3}; color: ${v.txt}; font-weight: 600; box-shadow: inset 0 -2px 0 ${v.bdr2}; }
     .topbar-divider { width: 1px; height: 18px; background: ${v.bdr}; margin: 0 4px; }
     .topbar-nav { display: flex; gap: 4px; align-items: center; }
     .hamburger-btn { display: none; background: transparent; border: none; color: ${v.txt2}; cursor: pointer; padding: 6px; border-radius: 8px; }
     .hamburger-btn:hover { background: ${v.bg3}; }
     .mobile-menu {
-      position: fixed; top: 49px; left: 0; right: 0; z-index: 99;
+      position: fixed; top: 49px; left: 0; right: 0; z-index: 101;
       background: ${v.bg}; border-bottom: 1px solid ${v.bdr};
       display: flex; flex-direction: column; padding: 8px;
-      animation: slide-in .15s ease;
+      animation: slide-down .15s ease-out;
     }
     .mobile-menu .topbar-btn { text-align: left; padding: 10px 14px; width: 100%; border-radius: 8px; }
     @media (max-width: 640px) {
@@ -116,6 +120,12 @@ export function makeGlobalStyles(dark) {
     .btn-secondary:hover { border-color: ${v.bdr2}; background: ${v.bg3}; }
     .btn-danger { background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all .15s; }
     .btn-danger:hover { background: ${dark ? "#2d1b1b" : "#fef2f2"}; }
+
+    /* ── FOCUS RING (keyboard only) ── */
+    :focus-visible { outline: 2px solid ${v.bdr2}; outline-offset: 2px; border-radius: 6px; }
+    .btn-primary:focus-visible, .btn-secondary:focus-visible, .next-btn:focus-visible { outline-color: ${v.txt}; }
+    .choice-btn:focus-visible, .tf-btn:focus-visible { outline: 2px solid ${v.bdr2}; outline-offset: 2px; }
+    .field-input:focus-visible, .fill-input:focus-visible { outline: none; }
 
     /* ── FORM ── */
     .field-label { font-size: 11px; color: ${v.txt2}; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 6px; display: block; }

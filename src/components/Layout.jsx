@@ -100,7 +100,7 @@ export function Header() {
                     {(user.displayName || user.email || "?")[0].toUpperCase()}
                   </div>
                 )}
-                <span style={{ maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>
+                <span style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>
                   {user.displayName || user.email?.split("@")[0]}
                 </span>
               </button>

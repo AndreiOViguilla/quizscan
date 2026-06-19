@@ -607,9 +607,9 @@ export default function HomePage() {
                 {generated ? "Quiz generated successfully" : "AI will create questions from your content"}
               </p>
               <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate} disabled={isGenerating}>
-                {isGenerating ? "Generating..." : generated ? "Regenerate" : "Generate"}
+                {isGenerating ? <><span className="spinner" />{genStatus || "Generating..."}</> : generated ? "Regenerate" : "Generate"}
               </button>
-              {genStatus && <div className="alert-info" style={{ marginTop: 8, fontSize: 12 }}>{genStatus}</div>}
+              {genStatus && !isGenerating && <div className="alert-info" style={{ marginTop: 8, fontSize: 12 }}>{genStatus}</div>}
               {generated && (
                 <button className="btn-secondary" style={{ width: "100%", padding: "8px", fontSize: 12 }}
                   onClick={async () => {
