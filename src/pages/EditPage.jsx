@@ -63,9 +63,32 @@ export default function EditPage() {
   };
 
   const MODES = [
-    { id: "normal", label: "Normal", desc: "Standard quiz" },
-    { id: "survival", label: "Survival", desc: "3 lives, wrong = -1" },
-    { id: "speedrun", label: "Speed Run", desc: "Race the clock" },
+    {
+      id: "normal", label: "Normal", desc: "Standard quiz",
+      icon: (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+          <rect x="9" y="3" width="6" height="4" rx="1"/>
+          <path d="M9 12h6M9 16h4"/>
+        </svg>
+      ),
+    },
+    {
+      id: "survival", label: "Survival", desc: "3 lives, wrong = -1",
+      icon: (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+        </svg>
+      ),
+    },
+    {
+      id: "speedrun", label: "Speed Run", desc: "Race the clock",
+      icon: (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+      ),
+    },
   ];
 
   return (
@@ -93,7 +116,7 @@ export default function EditPage() {
               style={{ padding: "8px 16px", fontSize: 12, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, height: "auto" }}
               onClick={() => setGameMode(m.id)}
             >
-              <span style={{ fontWeight: 700 }}>{m.label}</span>
+              <span style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>{m.icon}{m.label}</span>
               <span style={{ opacity: 0.55, fontSize: 10, fontWeight: 400 }}>{m.desc}</span>
             </button>
           ))}
