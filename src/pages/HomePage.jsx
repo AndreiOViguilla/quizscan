@@ -336,6 +336,7 @@ export default function HomePage() {
       const assignedName = room.assignedName || name;
       const players = room.players ? Object.values(room.players) : [];
       if (room.questions?.length) ctx.setQuestions(room.questions);
+      ctx.setMpSyncMode(room.syncMode || "self");
       const listener = new FirebaseListener(`/rooms/${code}/players`, (ps) => {
         if (ps && typeof ps === "object") {
           const arr = Object.values(ps).sort((a, b) => (b.score || 0) - (a.score || 0));

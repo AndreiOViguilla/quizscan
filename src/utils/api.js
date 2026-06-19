@@ -245,6 +245,14 @@ export function decodeQuiz(str) {
   catch { return null; }
 }
 
+export async function setRoomCurrentQ(code, q) {
+  await fbUpdate(`/rooms/${code}`, { currentQ: q });
+}
+
+export async function setRoomSyncMode(code, syncMode) {
+  await fbUpdate(`/rooms/${code}`, { syncMode });
+}
+
 export async function updateMpScore(code, playerName, score, currentQ) {
   await fbUpdate(`/rooms/${code}/players/${playerName}`, {
     score,

@@ -77,6 +77,7 @@ export function AppProvider({ children }) {
   const [myMpName, setMyMpName] = useState("");
   const [mpStatus, setMpStatus] = useState("");
   const [mpError, setMpError] = useState("");
+  const [mpSyncMode, setMpSyncMode] = useState("self"); // "self" | "host"
 
   // Data
   const [lb, setLb] = useState(loadLB());
@@ -166,6 +167,7 @@ export function AppProvider({ children }) {
       myMpName, setMyMpName,
       mpStatus, setMpStatus,
       mpError, setMpError,
+      mpSyncMode, setMpSyncMode,
       lb, setLb,
       history, setHistory,
       error, setError,

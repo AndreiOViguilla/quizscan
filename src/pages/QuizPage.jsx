@@ -3,7 +3,7 @@ import { useApp } from "../context/AppContext";
 import { BackButton } from "../components/Layout";
 import { LETTERS, TIMER_SEC } from "../utils/constants";
 import { playSound } from "../utils/sounds";
-import { groq, updateMpScore } from "../utils/api";
+import { groq, updateMpScore, setRoomCurrentQ, FirebaseListener } from "../utils/api";
 import { saveLB, saveHistory, loadHistory } from "../utils/storage";
 import { encodeQuiz } from "../utils/api";
 
@@ -25,6 +25,7 @@ export default function QuizPage() {
     navigate, quizStartTime,
     flagged, setFlagged,
     gameMode, lives, setLives,
+    mpSyncMode, mpMode,
     showToast,
   } = ctx;
 
@@ -32,6 +33,7 @@ export default function QuizPage() {
   const [showTabWarning, setShowTabWarning] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [syncCurrentQ, setSyncCurrentQ] = useState(null);
 
   // Speedrun: track elapsed seconds
   useEffect(() => {
@@ -41,6 +43,26 @@ export default function QuizPage() {
     }, 1000);
     return () => clearInterval(id);
   }, [gameMode, quizStartTime]);
+
+  // Host-advances sync: guests listen to room's currentQ
+  useEffect(() => {
+    if (!mpCode || mpSyncMode !== "host" || mpMode === "host") return;
+    const listener = new FirebaseListener(`/rooms/${mpCode}`, (room) => {
+      if (!room) return;
+      const q = room.currentQ;
+      if (typeof q === "number") setSyncCurrentQ(q);
+    });
+    listener.connect();
+    return () => listener.disconnect();
+  }, [mpCode, mpSyncMode, mpMode]);
+
+  // Navigate / finish when syncCurrentQ changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (syncCurrentQ === null || mpMode === "host" || mpSyncMode !== "host") return;
+    if (syncCurrentQ >= questions.length) { finishQuiz(); return; }
+    if (syncCurrentQ !== current) navigateToQuestion(syncCurrentQ);
+  }, [syncCurrentQ]);
 
   // Tab-switch detection
   useEffect(() => {
@@ -288,6 +310,22 @@ export default function QuizPage() {
 
   const elapsedFmt = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
 
+  const isHostSync = mpCode && mpSyncMode === "host" && mpMode === "host";
+  const isGuestSync = mpCode && mpSyncMode === "host" && mpMode !== "host";
+  // How many players have answered current question (current_q is set to current+1 after answering)
+  const answeredCount = mpPlayers.filter(p => (p.current_q || 0) > current).length;
+
+  const handleHostNext = () => {
+    const nextQ = current + 1;
+    if (nextQ >= questions.length) {
+      setRoomCurrentQ(mpCode, questions.length).catch(() => {});
+      finishQuiz();
+    } else {
+      setRoomCurrentQ(mpCode, nextQ).catch(() => {});
+      navigateToQuestion(nextQ);
+    }
+  };
+
   return (
     <div className="page quiz-page" onContextMenu={e => e.preventDefault()}>
 
@@ -508,8 +546,19 @@ export default function QuizPage() {
           {!revealed && q.type === "mcq" && (
             <button className="next-btn" onClick={() => submitAnswer()} disabled={selected === null}>Check →</button>
           )}
-          {revealed && (
-            <button className="next-btn" onClick={nextQuestion}>{nextLabel}</button>
+          {revealed && isGuestSync && (
+            <div style={{ fontSize: 12, opacity: 0.45, padding: "8px 12px", fontStyle: "italic" }}>
+              Waiting for host...
+            </div>
+          )}
+          {revealed && !isGuestSync && (
+            <button className="next-btn" onClick={isHostSync ? handleHostNext : nextQuestion}>
+              {isHostSync
+                ? (current + 1 >= questions.length
+                  ? `See Results (${answeredCount}/${mpPlayers.length}) →`
+                  : `Next (${answeredCount}/${mpPlayers.length}) →`)
+                : nextLabel}
+            </button>
           )}
         </div>
       </div>
