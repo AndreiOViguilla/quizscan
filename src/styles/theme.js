@@ -12,6 +12,11 @@ export function makeGlobalStyles(dark) {
 
   return `
     @import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap');
+    :root {
+      --bg: ${v.bg}; --bg2: ${v.bg2}; --bg3: ${v.bg3};
+      --bdr: ${v.bdr}; --bdr2: ${v.bdr2};
+      --txt: ${v.txt}; --txt2: ${v.txt2}; --txt3: ${v.txt3}; --dim: ${v.dim};
+    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: ${v.bg}; color: ${v.txt}; font-family: 'Instrument Sans', system-ui, sans-serif; transition: background .2s, color .2s; }
 
