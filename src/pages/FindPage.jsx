@@ -4,12 +4,28 @@ import { useAuth } from "../context/AuthContext";
 import { BackButton } from "../components/Layout";
 import { fbGet, fbPush, fbUpdate, deleteSharedQuiz, reportQuiz, getComments, addComment, deleteComment } from "../utils/db";
 
+const stripHtml = (s) => String(s || "").replace(/<[^>]*>/g, "").trim();
+const sanitizeField = (s, max = 500) => stripHtml(s).substring(0, max);
+
+function sanitizeQuestions(questions) {
+  return questions.map(q => ({
+    type: ["mcq", "tf", "fill"].includes(q.type) ? q.type : "fill",
+    question: sanitizeField(q.question, 500),
+    answer: sanitizeField(String(q.answer ?? ""), 200),
+    explanation: sanitizeField(q.explanation || "", 500),
+    choices: Array.isArray(q.choices) ? q.choices.slice(0, 4).map(c => sanitizeField(c, 200)) : undefined,
+  }));
+}
+
 export async function shareQuizPublicly(questions, topic, authorName, uid) {
   const res = await fetch("https://quizscan-94acb-default-rtdb.asia-southeast1.firebasedatabase.app/shared_quizzes.json", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      topic: topic || "Untitled Quiz", author: authorName || "Anonymous",
-      uid: uid || null, questions, count: questions.length,
+      topic: sanitizeField(topic || "Untitled Quiz", 100),
+      author: sanitizeField(authorName || "Anonymous", 50),
+      uid: uid || null,
+      questions: sanitizeQuestions(questions),
+      count: questions.length,
       createdAt: Date.now(), likes: 0, plays: 0, commentCount: 0,
       category: "General", reportCount: 0,
     }),

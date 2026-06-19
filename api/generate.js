@@ -1,12 +1,45 @@
+const crypto = require("crypto");
+
+function verifySignature(bodyStr, ts, sig) {
+  const secret = process.env.GENERATE_SECRET;
+  if (!secret) return true; // skip check if secret not configured
+  if (!ts || !sig) return false;
+  const age = Math.abs(Date.now() - parseInt(ts));
+  if (age > 30000) return false; // reject requests older than 30s
+  const expected = crypto.createHmac("sha256", secret).update(ts + bodyStr).digest("hex");
+  try {
+    return crypto.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
+  } catch { return false; }
+}
+
+const MAX_MESSAGES = 12;
+const MAX_CONTENT_LENGTH = 12000; // chars across all messages
+
 module.exports = async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGIN || "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Timestamp, X-Signature");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
+  // Verify HMAC signature
+  const bodyStr = JSON.stringify(req.body);
+  const ts = req.headers["x-timestamp"];
+  const sig = req.headers["x-signature"];
+  if (!verifySignature(bodyStr, ts, sig)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
   const { messages, model = "Qwen/Qwen2.5-72B-Instruct", maxTokens = 8000 } = req.body;
   if (!messages?.length) return res.status(400).json({ error: "Missing messages" });
+
+  // Server-side size limits
+  if (messages.length > MAX_MESSAGES) return res.status(400).json({ error: "Too many messages" });
+  const totalLength = messages.reduce((sum, m) => {
+    const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+    return sum + content.length;
+  }, 0);
+  if (totalLength > MAX_CONTENT_LENGTH) return res.status(400).json({ error: "Content too large" });
 
   const HF_TOKEN = process.env.HF_TOKEN;
   const HF_SPACE_URL = process.env.HF_SPACE_URL; // e.g. https://yourusername-quizscan-model.hf.space

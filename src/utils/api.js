@@ -1,5 +1,21 @@
 import { GROQ_KEY } from "./constants";
 
+// ─── REQUEST SIGNING (HMAC-SHA256) ────────────────────────────────────────────
+const GENERATE_SECRET = process.env.REACT_APP_GENERATE_SECRET || "";
+
+async function signRequest(bodyStr) {
+  if (!GENERATE_SECRET) return {};
+  const ts = Date.now().toString();
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw", encoder.encode(GENERATE_SECRET),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(ts + bodyStr));
+  const sigHex = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+  return { "X-Timestamp": ts, "X-Signature": sigHex };
+}
+
 // ─── GROQ ─────────────────────────────────────────────────────────────────────
 export async function groq(messages, model = "llama-3.3-70b-versatile", maxTokens = 8000) {
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -21,10 +37,12 @@ export async function generateText(messages, maxTokens = 8000) {
 
   // 1. Try HF (serverless → Space fallback handled in backend)
   try {
+    const bodyStr = JSON.stringify({ messages, model: HF_MODEL, maxTokens });
+    const sigHeaders = await signRequest(bodyStr);
     const res = await fetch("/api/generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, model: HF_MODEL, maxTokens }),
+      headers: { "Content-Type": "application/json", ...sigHeaders },
+      body: bodyStr,
     });
     const data = await res.json();
     if (res.ok && data.content) return data.content;
