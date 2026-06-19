@@ -17,6 +17,9 @@ export async function groq(messages, model = "llama-3.3-70b-versatile", maxToken
 const HF_MODEL = "Qwen/Qwen2.5-72B-Instruct";
 
 export async function generateText(messages, maxTokens = 8000) {
+  const failures = [];
+
+  // 1. Try HF (serverless → Space fallback handled in backend)
   try {
     const res = await fetch("/api/generate", {
       method: "POST",
@@ -25,11 +28,30 @@ export async function generateText(messages, maxTokens = 8000) {
     });
     const data = await res.json();
     if (res.ok && data.content) return data.content;
-    console.warn("HF failed, falling back to Groq:", data.error);
+    failures.push(data.error || `HF returned ${res.status}`);
   } catch (e) {
-    console.warn("HF request error, falling back to Groq:", e.message);
+    failures.push("HF unreachable");
   }
-  return groq(messages, "llama-3.3-70b-versatile", maxTokens);
+
+  // 2. Fall back to Groq
+  try {
+    return await groq(messages, "llama-3.3-70b-versatile", maxTokens);
+  } catch (e) {
+    const msg = e.message || "";
+    if (msg.toLowerCase().includes("rate_limit") || msg.includes("429")) {
+      failures.push("Groq rate limit reached — try again in a few minutes");
+    } else {
+      failures.push(msg || "Groq failed");
+    }
+  }
+
+  // All providers failed
+  const isRateLimit = failures.some(f => f.includes("rate limit") || f.includes("429"));
+  throw new Error(
+    isRateLimit
+      ? "You've reached the AI usage limit. Please wait a few minutes and try again."
+      : "All AI providers are currently unavailable. Check your connection and try again."
+  );
 }
 
 export function parseQuestions(raw) {

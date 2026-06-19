@@ -5,7 +5,16 @@ const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
   const [page, setPage] = useState("home"); // home|loading|edit|quiz|study|flashcard|results|leaderboard|history|multiplayer
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem("quizscan-theme");
+    return saved ? saved === "dark" : true;
+  });
+
+  const toggleDark = (val) => {
+    const next = typeof val === "boolean" ? val : !dark;
+    setDark(next);
+    localStorage.setItem("quizscan-theme", next ? "dark" : "light");
+  };
   const [mode, setMode] = useState("quiz"); // quiz|study|flashcard
   const [tab, setTab] = useState("pdf");
 
@@ -93,7 +102,7 @@ export function AppProvider({ children }) {
   return (
     <AppContext.Provider value={{
       page, navigate,
-      dark, setDark,
+      dark, setDark, toggleDark,
       mode, setMode,
       tab, setTab,
       file, setFile,
