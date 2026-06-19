@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useApp } from "../context/AppContext";
 import { BackButton } from "../components/Layout";
 import { getUserProfile, getUserSharedQuizzes, getUserAchievements, ACHIEVEMENTS, deleteSharedQuiz } from "../utils/db";
+import { loadHistory } from "../utils/storage";
 
 export default function ProfilePage() {
   const { user } = useAuth();
+  const { dark } = useApp();
   const [profile, setProfile] = useState(null);
   const [quizzes, setQuizzes] = useState([]);
   const [achievements, setAchievements] = useState([]);
@@ -100,6 +103,54 @@ export default function ProfilePage() {
           );
         })}
       </div>
+
+      {/* Streak calendar */}
+      {(() => {
+        const hData = loadHistory();
+        const today = new Date();
+        const CELLS = 16 * 7;
+        const dayCounts = {};
+        hData.forEach(h => {
+          const d = new Date(h.id);
+          const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+          dayCounts[key] = (dayCounts[key] || 0) + 1;
+        });
+        const cells = [];
+        for (let i = CELLS - 1; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(today.getDate() - i);
+          const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+          cells.push({ d, count: dayCounts[key] || 0 });
+        }
+        const totalActive = cells.filter(c => c.count > 0).length;
+        const colors = dark
+          ? ["#2a2a2a", "#1a3d28", "#236b3b", "#2d9450", "#39bd66"]
+          : ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"];
+        return (
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>Activity Calendar</div>
+              <div style={{ fontSize: 11, opacity: 0.4 }}>{totalActive} active days</div>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(16, 14px)", gridTemplateRows: "repeat(7, 14px)", gap: 3, width: "fit-content" }}>
+                {cells.map((cell, i) => (
+                  <div
+                    key={i}
+                    title={`${cell.d.toDateString()}: ${cell.count} quiz${cell.count !== 1 ? "zes" : ""}`}
+                    style={{
+                      width: 14, height: 14, borderRadius: 3,
+                      background: colors[Math.min(cell.count, 4)],
+                      cursor: "default",
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div style={{ fontSize: 11, opacity: 0.35, marginTop: 8 }}>Last 16 weeks · oldest left, newest right</div>
+          </div>
+        );
+      })()}
 
       {/* Shared quizzes */}
       <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Your Shared Quizzes</div>

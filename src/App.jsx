@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { cleanupExpiredRooms } from "./utils/api";
 import { makeGlobalStyles } from "./styles/theme";
 import { Header, Footer, Confetti } from "./components/Layout";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 import HomePage from "./pages/HomePage";
 import LoadingPage from "./pages/LoadingPage";
@@ -122,11 +123,13 @@ function InnerApp() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppProvider>
-        <IdleLogout />
-        <InnerApp />
-      </AppProvider>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <AppProvider>
+          <IdleLogout />
+          <InnerApp />
+        </AppProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

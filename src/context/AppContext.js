@@ -36,6 +36,8 @@ export function AppProvider({ children }) {
   const [autoDiff, setAutoDiff] = useState(false);
   const [useShuffleQ, setUseShuffleQ] = useState(false);
   const [useShuffleChoices, setUseShuffleChoices] = useState(false);
+  const [gameMode, setGameMode] = useState("normal"); // normal | survival | speedrun
+  const [lives, setLives] = useState(3);
   const [mpAfterGenerate, setMpAfterGenerate] = useState(false);
 
   // Quiz state
@@ -104,6 +106,7 @@ export function AppProvider({ children }) {
     setStreak(0); setBestStreak(0); setShareUrl("");
     setFlipped(false); setFcKnown(new Set());
     setFlagged(new Set());
+    setLives(3);
   };
 
   const navigate = (to) => {
@@ -130,8 +133,13 @@ export function AppProvider({ children }) {
       useStreak, setUseStreak,
       useSounds, setUseSounds,
       autoDiff, setAutoDiff,
+      useShuffleQ, setUseShuffleQ,
+      useShuffleChoices, setUseShuffleChoices,
+      gameMode, setGameMode,
+      lives, setLives,
       mpAfterGenerate, setMpAfterGenerate,
       questions, setQuestions,
+      flagged, setFlagged,
       current, setCurrent,
       answers, setAnswers,
       selected, setSelected,
