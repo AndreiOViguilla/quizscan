@@ -34,10 +34,13 @@ export function AppProvider({ children }) {
   const [useStreak, setUseStreak] = useState(true);
   const [useSounds, setUseSounds] = useState(true);
   const [autoDiff, setAutoDiff] = useState(false);
+  const [useShuffleQ, setUseShuffleQ] = useState(false);
+  const [useShuffleChoices, setUseShuffleChoices] = useState(false);
   const [mpAfterGenerate, setMpAfterGenerate] = useState(false);
 
   // Quiz state
   const [questions, setQuestions] = useState([]);
+  const [flagged, setFlagged] = useState(new Set());
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState({});
   const [selected, setSelected] = useState(null);
@@ -100,6 +103,7 @@ export function AppProvider({ children }) {
     setCurrentDiffLevel("easy"); setAdaptNotice(""); setAdaptingQ(false);
     setStreak(0); setBestStreak(0); setShareUrl("");
     setFlipped(false); setFcKnown(new Set());
+    setFlagged(new Set());
   };
 
   const navigate = (to) => {
