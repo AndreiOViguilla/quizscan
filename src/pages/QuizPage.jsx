@@ -178,7 +178,7 @@ export default function QuizPage() {
   const correctCount = Object.values(answers).filter(a => a.correct).length;
 
   return (
-    <div className="page">
+    <div className="page quiz-page" onContextMenu={e => e.preventDefault()}>
       {/* Header row */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
