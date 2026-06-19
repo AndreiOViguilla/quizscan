@@ -16,11 +16,14 @@ export default class ErrorBoundary extends Component {
 
   render() {
     if (!this.state.hasError) return this.props.children;
+    const isPageBoundary = !!this.props.onReset;
     return (
       <div style={{
-        minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+        minHeight: isPageBoundary ? "60vh" : "100vh",
+        display: "flex", alignItems: "center", justifyContent: "center",
         padding: 24, fontFamily: "'Instrument Sans', system-ui, sans-serif",
-        background: "#212121", color: "#ececec",
+        background: isPageBoundary ? "transparent" : "#212121",
+        color: isPageBoundary ? "inherit" : "#ececec",
       }}>
         <div style={{ maxWidth: 420, width: "100%", textAlign: "center" }}>
           <div style={{ fontSize: 40, marginBottom: 16 }}>⚠</div>
@@ -28,11 +31,20 @@ export default class ErrorBoundary extends Component {
           <div style={{ fontSize: 13, opacity: 0.5, marginBottom: 28, lineHeight: 1.6 }}>
             {this.state.message}
           </div>
-          <button
-            onClick={() => window.location.reload()}
-            style={{ background: "#ececec", color: "#212121", border: "none", padding: "11px 28px", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
-            Reload App
-          </button>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+            {isPageBoundary && (
+              <button
+                onClick={() => { this.setState({ hasError: false }); this.props.onReset?.(); }}
+                style={{ background: "var(--bg3,#333)", color: "inherit", border: "1px solid var(--bdr,#444)", padding: "11px 28px", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+                Go Home
+              </button>
+            )}
+            <button
+              onClick={() => window.location.reload()}
+              style={{ background: "#ececec", color: "#212121", border: "none", padding: "11px 28px", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+              Reload App
+            </button>
+          </div>
         </div>
       </div>
     );

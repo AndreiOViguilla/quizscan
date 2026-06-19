@@ -86,7 +86,7 @@ export default function QuizPage() {
           const q = questions[current];
           if (q) {
             if (useSounds) playSound("wrong");
-            setAnswers(prev => ({ ...prev, [current]: { userAnswer: null, correct: false } }));
+            setAnswers(prev => ({ ...prev, [current]: { userAnswer: null, correct: false, revealed: true } }));
             setRevealed(true); setStreak(0);
           }
           return 0;
@@ -149,7 +149,7 @@ export default function QuizPage() {
           const q = questions[current];
           if (q) {
             if (useSounds) playSound("wrong");
-            setAnswers(prev => ({ ...prev, [current]: { userAnswer: null, correct: false } }));
+            setAnswers(prev => ({ ...prev, [current]: { userAnswer: null, correct: false, revealed: true } }));
             setRevealed(true); setStreak(0);
           }
           return 0;
@@ -160,13 +160,22 @@ export default function QuizPage() {
     return () => clearInterval(timerRef.current);
   }, [current, useTimer, revealed, gameMode]);
 
+  const retryMpScore = async (code, name, score, q) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { await updateMpScore(code, name, score, q); return; } catch {
+        if (attempt === 2) showToast("Score sync failed — check connection", "error");
+        else await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
+  };
+
   const navigateToQuestion = (i) => {
     const prev = answers[i];
     setCurrent(i);
     if (prev !== undefined) {
       setSelected(prev.userAnswer);
       setFillVal(typeof prev.userAnswer === "string" ? prev.userAnswer : "");
-      setRevealed(true);
+      setRevealed(prev.revealed ?? true);
     } else {
       setSelected(null); setFillVal(""); setRevealed(false);
     }
@@ -228,7 +237,7 @@ export default function QuizPage() {
     const ns = correct ? streak + 1 : 0;
     setStreak(ns); setBestStreak(b => Math.max(b, ns));
     const timeTaken = Math.max(1, Math.round((Date.now() - qStartRef.current) / 1000));
-    const newAnswers = { ...answers, [current]: { userAnswer: ua, correct, timeTaken } };
+    const newAnswers = { ...answers, [current]: { userAnswer: ua, correct, timeTaken, revealed: true } };
     setAnswers(newAnswers);
     setRevealed(true);
     if (gameMode === "survival" && !correct) {
@@ -241,7 +250,7 @@ export default function QuizPage() {
     }
     if (mpCode && myMpName) {
       const newScore = Object.values(newAnswers).filter(a => a.correct).length;
-      updateMpScore(mpCode, myMpName, newScore, current + 1).catch(() => {});
+      retryMpScore(mpCode, myMpName, newScore, current + 1);
     }
     adaptDifficulty(newAnswers, current);
   };

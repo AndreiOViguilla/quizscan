@@ -55,16 +55,16 @@ export function Header() {
   return (
     <>
       <div className="topbar">
-        <div className="topbar-logo" onClick={() => navigate("home")}>QuizScan</div>
+        <div className="topbar-logo" onClick={() => navigate("home")} role="button" tabIndex={0} onKeyDown={e => e.key === "Enter" && navigate("home")} aria-label="Go to home">QuizScan</div>
         <div className="topbar-right">
           <nav className="topbar-nav">
             {NAV.map(n => (
-              <button key={n.to} className={`topbar-btn ${page === n.to ? "active" : ""}`} onClick={() => navigate(n.to)}>
+              <button key={n.to} className={`topbar-btn ${page === n.to ? "active" : ""}`} onClick={() => navigate(n.to)} aria-current={page === n.to ? "page" : undefined}>
                 {n.label}
               </button>
             ))}
           </nav>
-          <button className="hamburger-btn" onClick={() => setShowMobileMenu(m => !m)} aria-label="Menu">
+          <button className="hamburger-btn" onClick={() => setShowMobileMenu(m => !m)} aria-label="Menu" aria-expanded={showMobileMenu}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               {showMobileMenu
                 ? <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
@@ -72,7 +72,7 @@ export function Header() {
             </svg>
           </button>
           <div className="topbar-divider" />
-          <button className="topbar-btn" onClick={toggleDark} title={dark ? "Switch to light mode" : "Switch to dark mode"}
+          <button className="topbar-btn" onClick={toggleDark} aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
             style={{ padding: "6px 10px", display: "flex", alignItems: "center" }}>
             {dark ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -92,9 +92,9 @@ export function Header() {
           {user ? (
             <div style={{ position: "relative" }}>
               <button className="topbar-btn" style={{ display: "flex", alignItems: "center", gap: 6 }}
-                onClick={() => setShowUserMenu(m => !m)}>
+                onClick={() => setShowUserMenu(m => !m)} aria-expanded={showUserMenu} aria-label="User menu">
                 {user.photoURL ? (
-                  <img src={user.photoURL} alt="" style={{ width: 22, height: 22, borderRadius: "50%", objectFit: "cover" }} />
+                  <img src={user.photoURL} alt={user.displayName || "User avatar"} style={{ width: 22, height: 22, borderRadius: "50%", objectFit: "cover" }} />
                 ) : (
                   <div style={{ width: 22, height: 22, borderRadius: "50%", background: "var(--bdr2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 }}>
                     {(user.displayName || user.email || "?")[0].toUpperCase()}
@@ -158,11 +158,11 @@ export function Footer() {
   return (
     <footer className="footer">
       <div className="footer-left"><span>QuizScan</span> — AI quiz generator</div>
-      <div className="footer-right">
-        <span className="footer-link" onClick={() => navigate("home")}>Home</span>
-        <span className="footer-link" onClick={() => navigate("leaderboard")}>Leaderboard</span>
-        <span className="footer-link" onClick={() => navigate("history")}>History</span>
-      </div>
+      <nav className="footer-right" aria-label="Footer navigation">
+        <button className="footer-link" onClick={() => navigate("home")}>Home</button>
+        <button className="footer-link" onClick={() => navigate("leaderboard")}>Leaderboard</button>
+        <button className="footer-link" onClick={() => navigate("history")}>History</button>
+      </nav>
     </footer>
   );
 }

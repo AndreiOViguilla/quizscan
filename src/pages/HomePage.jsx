@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
 import { useSettings } from "../context/SettingsContext";
 import { useQuiz } from "../context/QuizContext";
 import { useMultiplayer } from "../context/MultiplayerContext";
 import { Toggle } from "../components/Layout";
 import { groq, generateText, parseQuestions, createRoom, joinRoom, FirebaseListener, decodeQuiz } from "../utils/api";
+import { saveDraft, loadDraft } from "../utils/storage";
 import { shareQuizPublicly } from "./FindPage";
 import { useAuth } from "../context/AuthContext";
 import { LANGUAGES } from "../utils/constants";
@@ -85,6 +86,12 @@ export default function HomePage() {
   const [manualList, setManualList] = useState([]);
   const [ytStatus, setYtStatus] = useState("");
   const [genStatus, setGenStatus] = useState("");
+  const [draft, setDraft] = useState(null);
+
+  useEffect(() => {
+    const saved = loadDraft();
+    if (saved?.length) setDraft(saved);
+  }, []);
 
   useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -123,6 +130,8 @@ export default function HomePage() {
 
   const startQuiz = async (qs) => {
     setQuestions(qs);
+    saveDraft(qs);
+    setDraft(null);
     resetQuizState();
     quizStartTime.current = Date.now();
     if (mode === "study") { navigate("study"); return; }
@@ -177,6 +186,7 @@ export default function HomePage() {
         blocks.push({ type: "text", text: `Read ALL text in these PDF pages and generate exactly ${numQ} quiz questions from it. ${typeInstr} ${langNote} ${jsonInstr}` });
         messages = [systemMsg, { role: "user", content: blocks }];
       } else if (tab === "url") {
+        setGenStatus("Fetching page content...");
         let pageText = null;
         const proxies = [
           `https://api.allorigins.win/get?url=${encodeURIComponent(urlVal)}`,
@@ -211,6 +221,7 @@ export default function HomePage() {
         const raw = await generateText([systemMsg, { role: "user", content: urlPrompt }]);
         await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "youtube") {
+        setGenStatus("Fetching video transcript...");
         const videoId = ytVal.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/)?.[1];
         if (!videoId) throw new Error("Could not extract video ID. Make sure it is a valid YouTube link.");
 
@@ -368,6 +379,22 @@ export default function HomePage() {
 
   return (
     <div className="page" style={{ maxWidth: 620, paddingTop: 72 }}>
+
+      {draft && !generated && (
+        <div className="alert-info" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13 }}>You have an unsaved quiz from your last session ({draft.length} questions).</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-primary" style={{ padding: "6px 14px", fontSize: 12 }}
+              onClick={() => { setQuestions(draft); resetQuizState(); quizStartTime.current = Date.now(); setGenerated(draft); setShowSettings(true); setDraft(null); }}>
+              Restore
+            </button>
+            <button className="btn-secondary" style={{ padding: "6px 14px", fontSize: 12 }}
+              onClick={() => setDraft(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {generated && !showSettings ? (
         <>

@@ -1,5 +1,7 @@
 import { LB_KEY, HIST_KEY } from "./constants";
 
+const DRAFT_KEY = "qs_draft";
+
 export function loadLB() {
   try { return JSON.parse(localStorage.getItem(LB_KEY) || "[]"); } catch { return []; }
 }
@@ -19,3 +21,6 @@ export function saveHistory(entry) {
 }
 export function clearLB() { localStorage.removeItem(LB_KEY); }
 export function clearHistory() { localStorage.removeItem(HIST_KEY); }
+export function saveDraft(qs) { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(qs)); } catch {} }
+export function loadDraft() { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); } catch { return null; } }
+export function clearDraft() { localStorage.removeItem(DRAFT_KEY); }
