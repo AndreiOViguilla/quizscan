@@ -412,9 +412,9 @@ export default function QuizPage() {
           return (
             <div
               key={i}
-              onClick={() => navigateToQuestion(i)}
+              onClick={() => !isHostSync && !isGuestSync && navigateToQuestion(i)}
               title={`Q${i + 1}${isFlg ? " (flagged)" : ""}`}
-              style={{ width: 8, height: 8, borderRadius: "50%", background: bg, border: `2px solid ${borderColor}`, cursor: "pointer", transition: "all .15s", flexShrink: 0 }}
+              style={{ width: 8, height: 8, borderRadius: "50%", background: bg, border: `2px solid ${borderColor}`, cursor: (isHostSync || isGuestSync) ? "default" : "pointer", transition: "all .15s", flexShrink: 0 }}
             />
           );
         })}
@@ -537,7 +537,7 @@ export default function QuizPage() {
           ← Quit
         </button>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {!revealed && (
+          {!revealed && !isGuestSync && (
             <button className="btn-secondary" onClick={skipQuestion} style={{ fontSize: 12, padding: "8px 16px" }}>
               Skip
             </button>

@@ -58,19 +58,31 @@ export default function MultiplayerPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <button
               className={`edit-correct-btn ${mpSyncMode === "self" ? "sel" : ""}`}
-              style={{ padding: "9px 18px", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, height: "auto" }}
+              style={{ padding: "10px 18px", fontSize: 13, display: "flex", flexDirection: "row", alignItems: "center", gap: 12, height: "auto" }}
               onClick={() => setSyncMode("self")}
             >
-              <span style={{ fontWeight: 700 }}>Self-paced</span>
-              <span style={{ fontSize: 10, opacity: 0.55, fontWeight: 400 }}>Everyone answers at their own pace</span>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.8 }}>
+                <circle cx="12" cy="8" r="4" />
+                <path d="M6 21v-1a6 6 0 0 1 12 0v1" />
+              </svg>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                <span style={{ fontWeight: 700 }}>Self-paced</span>
+                <span style={{ fontSize: 10, opacity: 0.55, fontWeight: 400 }}>Everyone answers at their own pace</span>
+              </div>
             </button>
             <button
               className={`edit-correct-btn ${mpSyncMode === "host" ? "sel" : ""}`}
-              style={{ padding: "9px 18px", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, height: "auto" }}
+              style={{ padding: "10px 18px", fontSize: 13, display: "flex", flexDirection: "row", alignItems: "center", gap: 12, height: "auto" }}
               onClick={() => setSyncMode("host")}
             >
-              <span style={{ fontWeight: 700 }}>Host controls</span>
-              <span style={{ fontSize: 10, opacity: 0.55, fontWeight: 400 }}>You advance everyone simultaneously</span>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.8 }}>
+                <path d="M3 18 L5.5 9 L10 13 L12 5 L14 13 L18.5 9 L21 18 Z" />
+                <line x1="3" y1="21" x2="21" y2="21" />
+              </svg>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                <span style={{ fontWeight: 700 }}>Host controls</span>
+                <span style={{ fontSize: 10, opacity: 0.55, fontWeight: 400 }}>You advance everyone simultaneously</span>
+              </div>
             </button>
           </div>
         </div>
