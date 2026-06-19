@@ -131,7 +131,9 @@ async function fbDelete(path) {
 }
 
 function genCode() {
-  return Math.random().toString(36).substring(2, 6).toUpperCase();
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return arr[0].toString(36).substring(0, 4).toUpperCase().padEnd(4, "0");
 }
 
 export async function createRoom(questions, hostName) {
