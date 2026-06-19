@@ -14,6 +14,13 @@ export function makeGlobalStyles(dark) {
     @import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: ${v.bg}; color: ${v.txt}; font-family: 'Instrument Sans', system-ui, sans-serif; transition: background .2s, color .2s; }
+
+    /* ── SCROLLBAR ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: ${v.bdr2}; border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: ${v.dim}; }
+    * { scrollbar-width: thin; scrollbar-color: ${v.bdr2} transparent; }
     a { color: ${v.txt2}; text-decoration: none; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
     @keyframes bar-fill { 0%{width:0%} 100%{width:100%} }
@@ -22,7 +29,7 @@ export function makeGlobalStyles(dark) {
 
     /* ── LAYOUT ── */
     .app { min-height: 100vh; background: ${v.bg}; display: flex; flex-direction: column; }
-    .page { flex: 1; max-width: 760px; margin: 0 auto; width: 100%; padding: 48px 24px; animation: slide-in .2s ease; }
+    .page { flex: 1; max-width: 760px; margin: 0 auto; width: 100%; padding: 72px 24px 48px; animation: slide-in .2s ease; }
 
     /* ── NO HEADER - hidden ── */
     .header { display: none; }
