@@ -51,16 +51,23 @@ export async function generateText(messages, maxTokens = 8000) {
     failures.push("HF unreachable");
   }
 
-  // 2. Fall back to Groq
+  // 2. Fall back to Groq (via backend proxy to avoid CORS)
   try {
-    return await groq(messages, "llama-3.3-70b-versatile", maxTokens);
-  } catch (e) {
-    const msg = e.message || "";
-    if (msg.toLowerCase().includes("rate_limit") || msg.includes("429")) {
+    const res = await fetch("/api/groq", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, model: "llama-3.3-70b-versatile", maxTokens }),
+    });
+    const data = await res.json();
+    if (res.ok && data.content) return data.content;
+    const msg = data.error || "";
+    if (msg.toLowerCase().includes("rate_limit") || res.status === 429) {
       failures.push("Groq rate limit reached — try again in a few minutes");
     } else {
       failures.push(msg || "Groq failed");
     }
+  } catch (e) {
+    failures.push(e.message || "Groq unreachable");
   }
 
   // All providers failed

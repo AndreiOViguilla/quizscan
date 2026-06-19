@@ -127,7 +127,6 @@ export default function HomePage() {
     if (tab === "topic" && !topicVal.trim()) { ctx.setError("Please enter a topic first."); return; }
 
     setIsGenerating(true);
-    setGenStatus("Generating...");
     const warmupTimer = setTimeout(() => setGenStatus("Warming up AI model — this may take up to 30s..."), 8000);
     const slowTimer = setTimeout(() => setGenStatus("Still working, almost there..."), 22000);
 
