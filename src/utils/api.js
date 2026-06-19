@@ -198,6 +198,7 @@ export class FirebaseListener {
     this.es = null;
     this.interval = null;
     this.lastHash = null;
+    this._state = undefined; // local full-state cache
   }
 
   connect() {
@@ -208,19 +209,58 @@ export class FirebaseListener {
   _startSSE() {
     try {
       this.es = new EventSource(`${FB_URL}${this.path}.json`);
+
       this.es.addEventListener("put", (e) => {
-        try { const msg = JSON.parse(e.data); if (msg.data !== undefined) this._emit(msg.data); } catch {}
+        try {
+          const msg = JSON.parse(e.data);
+          if (!msg) return;
+          const isRoot = !msg.path || msg.path === "/";
+          if (isRoot) {
+            // Full-state replacement (initial load or root overwrite)
+            this._state = msg.data;
+          } else {
+            // Child path update — merge into cached state
+            const key = msg.path.replace(/^\//, "");
+            if (this._state && typeof this._state === "object") {
+              if (msg.data === null) delete this._state[key];
+              else this._state[key] = msg.data;
+            } else {
+              // No cached state yet; wait for the poll
+              return;
+            }
+          }
+          this._emit(this._state);
+        } catch {}
       });
+
       this.es.addEventListener("patch", (e) => {
-        try { const msg = JSON.parse(e.data); if (msg.data) this._emit(msg.data); } catch {}
+        try {
+          const msg = JSON.parse(e.data);
+          if (!msg || !msg.data || typeof msg.data !== "object") return;
+          if (!this._state || typeof this._state !== "object") return;
+          const key = (msg.path || "").replace(/^\//, "");
+          if (!key) {
+            Object.assign(this._state, msg.data);
+          } else if (this._state[key] && typeof this._state[key] === "object") {
+            Object.assign(this._state[key], msg.data);
+          } else {
+            this._state[key] = msg.data;
+          }
+          this._emit(this._state);
+        } catch {}
       });
+
       this.es.onerror = () => { this.es?.close(); this.es = null; };
     } catch {}
   }
 
   _startPoll() {
     this.interval = setInterval(async () => {
-      try { const data = await fbGet(this.path); this._emit(data); } catch {}
+      try {
+        const data = await fbGet(this.path);
+        this._state = data; // keep cache in sync with source of truth
+        this._emit(data);
+      } catch {}
     }, 1500);
   }
 

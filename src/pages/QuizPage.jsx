@@ -386,7 +386,7 @@ export default function QuizPage() {
           )}
           {useStreak && streak >= 2 && <div className="badge">{streak}x streak</div>}
           {tabSwitches > 0 && <div className="badge" style={{ color: "#f59e0b", borderColor: "#f59e0b" }}>⚠ {tabSwitches} switch{tabSwitches !== 1 ? "es" : ""}</div>}
-          {mpCode && mpPlayers.map(p => (
+          {mpCode && mpPlayers.filter(p => p?.name).map(p => (
             <div key={p.name} className="badge" style={{ opacity: p.name === myMpName ? 1 : 0.6 }}>
               {p.name.substring(0, 8)} {p.score || 0}
             </div>
