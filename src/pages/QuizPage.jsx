@@ -57,7 +57,6 @@ export default function QuizPage() {
   }, [mpCode, mpSyncMode, mpMode]);
 
   // Navigate / finish when syncCurrentQ changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (syncCurrentQ === null || mpMode === "host" || mpSyncMode !== "host") return;
     if (syncCurrentQ >= questions.length) { finishQuiz(); return; }
