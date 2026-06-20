@@ -101,22 +101,41 @@ export default function HomePage() {
   useEffect(() => {
     const SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY;
     if (!SITE_KEY) return;
-    window.__tsSuccess = (token) => { setTurnstileToken(token); setTurnstileReady(true); };
-    window.__tsExpired = () => { setTurnstileToken(null); setTurnstileReady(false); };
-    window.__tsError = () => setTurnstileReady(true);
+    let pollTimer = null;
+    let widgetId = null;
+
+    const tryRender = () => {
+      const container = turnstileRef.current;
+      if (window.turnstile && container && !container._tsRendered) {
+        container._tsRendered = true;
+        widgetId = window.turnstile.render(container, {
+          sitekey: SITE_KEY,
+          callback: (token) => { setTurnstileToken(token); setTurnstileReady(true); },
+          "expired-callback": () => { setTurnstileToken(null); setTurnstileReady(false); },
+          "error-callback": () => setTurnstileReady(true),
+          theme: "auto",
+        });
+      } else {
+        pollTimer = setTimeout(tryRender, 200);
+      }
+    };
+
     if (!document.getElementById("ts-script")) {
       const script = document.createElement("script");
       script.id = "ts-script";
-      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
       script.async = true;
-      script.defer = true;
       script.onerror = () => setTurnstileReady(true);
       document.head.appendChild(script);
     }
+
+    tryRender();
+
     return () => {
-      delete window.__tsSuccess;
-      delete window.__tsExpired;
-      delete window.__tsError;
+      clearTimeout(pollTimer);
+      if (widgetId !== null && window.turnstile) {
+        try { window.turnstile.remove(widgetId); } catch {}
+      }
     };
   }, []);
 
@@ -664,14 +683,7 @@ export default function HomePage() {
               />
               {process.env.REACT_APP_TURNSTILE_SITE_KEY && (
                 <div style={{ marginBottom: 4 }}>
-                  <div
-                    className="cf-turnstile"
-                    data-sitekey={process.env.REACT_APP_TURNSTILE_SITE_KEY}
-                    data-callback="__tsSuccess"
-                    data-expired-callback="__tsExpired"
-                    data-error-callback="__tsError"
-                    data-theme="auto"
-                  />
+                  <div ref={turnstileRef} />
                   {!turnstileReady && <div style={{ fontSize: 12, color: "var(--txt2)", marginTop: 4 }}>Verifying you're human...</div>}
                 </div>
               )}
