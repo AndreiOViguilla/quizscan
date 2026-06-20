@@ -39,15 +39,18 @@ module.exports = async function handler(req, res) {
 
   try {
     // Step 1: Try youtube-transcript library (fastest, no API key needed)
-    try {
-      const segments = await YoutubeTranscript.fetchTranscript(id, { lang: "en" });
-      if (segments?.length > 5) {
-        const text = segments.map(s => s.text).join(" ").replace(/\s+/g, " ").trim();
-        if (text.length > 200) {
-          return res.status(200).json({ videoId: id, text, lang: "en", wordCount: text.split(" ").length, method: "youtube-transcript" });
+    for (const lang of ["en", "en-US", "fil", null]) {
+      try {
+        const opts = lang ? { lang } : {};
+        const segments = await YoutubeTranscript.fetchTranscript(id, opts);
+        if (segments?.length > 5) {
+          const text = segments.map(s => s.text).join(" ").replace(/\s+/g, " ").trim();
+          if (text.length > 200) {
+            return res.status(200).json({ videoId: id, text, lang: lang || "auto", wordCount: text.split(" ").length, method: "youtube-transcript" });
+          }
         }
-      }
-    } catch {}
+      } catch { continue; }
+    }
 
     // Step 2: Get video info from YouTube Data API
     let videoTitle = "";
