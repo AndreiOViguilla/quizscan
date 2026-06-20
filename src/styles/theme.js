@@ -65,7 +65,7 @@ export function makeGlobalStyles(dark) {
       transition: all .15s;
     }
     .topbar-btn:hover { background: ${v.bg3}; color: ${v.txt}; }
-    .topbar-btn.active { background: ${v.bg3}; color: ${v.txt}; font-weight: 600; box-shadow: inset 0 -2px 0 ${v.bdr2}; }
+    .topbar-btn.active { background: ${v.bg3}; color: ${v.txt}; font-weight: 600; }
     .topbar-divider { width: 1px; height: 18px; background: ${v.bdr}; margin: 0 4px; }
     .topbar-nav { display: flex; gap: 4px; align-items: center; }
     .hamburger-btn { display: none; background: transparent; border: none; color: ${v.txt2}; cursor: pointer; padding: 6px; border-radius: 8px; }
