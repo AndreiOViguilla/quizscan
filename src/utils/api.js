@@ -124,15 +124,20 @@ function genCode() {
   return arr[0].toString(36).substring(0, 4).toUpperCase().padEnd(4, "0");
 }
 
+function sanitizeFbKey(name) {
+  return String(name || "").replace(/[.#$[\]/]/g, "_").trim().substring(0, 32) || "Player";
+}
+
 export async function createRoom(questions, hostName) {
+  const safeHost = sanitizeFbKey(hostName) || "Host";
   let code = genCode();
   let existing = await fbGet(`/rooms/${code}`);
   while (existing) { code = genCode(); existing = await fbGet(`/rooms/${code}`); }
   await fbSet(`/rooms/${code}`, {
-    questions, host: hostName || "Host", status: "waiting",
+    questions, host: safeHost, status: "waiting",
     createdAt: Date.now(), lastActivity: Date.now(),
     expiresAt: Date.now() + 60 * 60 * 1000,
-    players: { [hostName || "Host"]: { name: hostName || "Host", score: 0, answer: null, ready: true } }
+    players: { [safeHost]: { name: safeHost, score: 0, answer: null, ready: true } }
   });
   setTimeout(() => deleteRoom(code).catch(() => {}), 60 * 60 * 1000);
   return code;
@@ -163,10 +168,10 @@ export async function joinRoom(code, playerName) {
   if (!room) throw new Error("Room not found. Check the code and try again.");
   if (room.status === "finished") throw new Error("This game has already ended.");
   const existing = room.players ? Object.keys(room.players) : [];
-  let uniqueName = playerName;
+  let uniqueName = sanitizeFbKey(playerName);
   let counter = 2;
   while (existing.includes(uniqueName)) {
-    uniqueName = `${playerName}${counter}`;
+    uniqueName = `${sanitizeFbKey(playerName)}${counter}`;
     counter++;
   }
   await fbUpdate(`/rooms/${code}/players/${uniqueName}`, { name: uniqueName, score: 0, answer: null, ready: true });

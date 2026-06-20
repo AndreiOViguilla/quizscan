@@ -61,6 +61,8 @@ export default function ResultsPage() {
   const escHtml = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
   const exportPDF = () => {
+    const quizTitle = escHtml(topicVal || file?.name || "Quiz");
+    const exportDate = escHtml(new Date().toLocaleDateString());
     const rows = questions.map((q, i) => {
       const a = answers[i];
       const dc = q.type === "mcq" ? q.choices?.[q.answer] : q.answer;
@@ -69,14 +71,16 @@ export default function ResultsPage() {
       return `<tr style="background:${i % 2 === 0 ? "#f9f9f9" : "#fff"}">
         <td style="padding:8px;border:1px solid #ddd">${i + 1}</td>
         <td style="padding:8px;border:1px solid #ddd">${escHtml(q.question)}</td>
-        <td style="padding:8px;border:1px solid #ddd;color:${a?.correct ? "#2e7d32" : "#c62828"}">${escHtml(ua)}</td>
-        <td style="padding:8px;border:1px solid #ddd;color:#2e7d32">${escHtml(dc)}</td>
+        <td style="padding:8px;border:1px solid #ddd;color:${a?.correct ? "#2e7d32" : "#c62828"}">${escHtml(String(ua ?? "—"))}</td>
+        <td style="padding:8px;border:1px solid #ddd;color:#2e7d32">${escHtml(String(dc ?? ""))}</td>
         <td style="padding:8px;border:1px solid #ddd;text-align:center">${a?.correct ? "+" : "x"}</td>
         <td style="padding:8px;border:1px solid #ddd;font-size:11px;color:#666">${escHtml(diff)}</td>
       </tr>`;
     }).join("");
-    const html = `<html><head><title>QuizScan Results</title></head><body style="font-family:sans-serif;padding:40px;max-width:860px;margin:0 auto">
-      <h1 style="color:#2e7d32">QuizScan Results</h1><p>${new Date().toLocaleDateString()}</p>
+    const html = `<html><head><title>QuizScan — ${quizTitle}</title></head><body style="font-family:sans-serif;padding:40px;max-width:860px;margin:0 auto">
+      <h1 style="color:#2e7d32">QuizScan Results</h1>
+      <p style="color:#666;margin-bottom:4px">${quizTitle}</p>
+      <p style="color:#999;font-size:12px">${exportDate}</p>
       <div style="display:flex;gap:32px;margin:20px 0">
         <div style="text-align:center"><div style="font-size:48px;font-weight:800;color:#4caf50">${pct}%</div><div style="color:#666;font-size:12px">SCORE</div></div>
         <div style="text-align:center"><div style="font-size:48px;font-weight:800;color:#4caf50">${correctCount}/${questions.length}</div><div style="color:#666;font-size:12px">CORRECT</div></div>

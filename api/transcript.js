@@ -1,11 +1,36 @@
 // api/transcript.js
 // Uses YouTube Data API v3 + timedtext for reliable transcript fetching
 
+const rateLimits = new Map();
+function checkRateLimit(ip, max = 10, windowMs = 60000) {
+  const now = Date.now();
+  const entry = rateLimits.get(ip) || { count: 0, reset: now + windowMs };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + windowMs; }
+  entry.count++;
+  rateLimits.set(ip, entry);
+  if (rateLimits.size > 500) {
+    for (const [k, v] of rateLimits) { if (now > v.reset) rateLimits.delete(k); }
+  }
+  return entry.count <= max;
+}
+
 module.exports = async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "";
+  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
+
+  // Block cross-origin requests from unknown origins in production
+  if (ALLOWED_ORIGIN) {
+    const origin = req.headers["origin"] || req.headers["referer"] || "";
+    if (origin && !origin.startsWith(ALLOWED_ORIGIN)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+  }
+
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
+  if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests. Please wait a minute." });
 
   const { videoId, url } = req.query;
   let id = videoId;

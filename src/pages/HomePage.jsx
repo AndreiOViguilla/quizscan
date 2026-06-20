@@ -141,6 +141,23 @@ export default function HomePage() {
     setShowSettings(true);
   };
 
+  const INJECTION_PATTERNS = [
+    /ignore\s+(previous|all|above|prior)\s+(instructions?|prompts?|context)/i,
+    /you\s+are\s+now/i,
+    /forget\s+(your|all|previous|prior)/i,
+    /\bact\s+as\b/i,
+    /\bpretend\s+(to\s+be|you\s+are)\b/i,
+    /\bsystem\s*:/i,
+    /<\|.{1,30}\|>/,
+    /\[INST\]/i,
+    /DAN\b/,
+  ];
+  const sanitizeUserInput = (str, maxLen = 2000) => {
+    let s = String(str || "").substring(0, maxLen).trim();
+    for (const pat of INJECTION_PATTERNS) s = s.replace(pat, "[…]");
+    return s;
+  };
+
   const generate = async () => {
     setError("");
     if (tab === "pdf" && !file) { setError("Please upload a PDF first."); return; }
@@ -217,7 +234,7 @@ export default function HomePage() {
         }
         const urlPrompt = pageText
           ? `Generate exactly ${numQ} quiz questions from this webpage content.\n${typeInstr} ${langNote} ${jsonInstr}\n\n<content>\n${pageText}\n</content>`
-          : `Generate exactly ${numQ} quiz questions about the topic of this URL: ${urlVal}. Use your knowledge about what this page likely contains. ${typeInstr} ${langNote} ${jsonInstr}`;
+          : `Generate exactly ${numQ} quiz questions about the topic of this URL: ${sanitizeUserInput(urlVal, 200)}. Use your knowledge about what this page likely contains. ${typeInstr} ${langNote} ${jsonInstr}`;
         const raw = await generateText([systemMsg, { role: "user", content: urlPrompt }]);
         await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "youtube") {
@@ -294,13 +311,13 @@ export default function HomePage() {
         if (transcriptText && transcriptText.length > 100) {
           ytPrompt = `Generate exactly ${numQ} quiz questions STRICTLY based on the content below. ${typeInstr} ${langNote} ${jsonInstr}\n\n<content>\n${transcriptText.substring(0, 6000)}\n</content>`;
         } else {
-          ytPrompt = `Generate exactly ${numQ} quiz questions about this YouTube video: ${ytVal}. Generate questions specifically about what this video covers. ${typeInstr} ${langNote} ${jsonInstr}`;
+          ytPrompt = `Generate exactly ${numQ} quiz questions about this YouTube video: ${sanitizeUserInput(ytVal, 200)}. Generate questions specifically about what this video covers. ${typeInstr} ${langNote} ${jsonInstr}`;
         }
 
         const raw = await generateText([systemMsg, { role: "user", content: ytPrompt }]);
         await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "topic") {
-        const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} quiz questions about: <content>${topicVal}</content>\n${typeInstr} ${langNote} ${jsonInstr}` }], numQ > 25 ? 8000 : 4000);
+        const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} quiz questions about: <content>${sanitizeUserInput(topicVal, 500)}</content>\n${typeInstr} ${langNote} ${jsonInstr}` }], numQ > 25 ? 8000 : 4000);
         await startQuiz(parseQuestions(raw)); return;
       } else {
         const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}\n\n<content>\n${text.trim().substring(0, 4000)}\n</content>` }]);
