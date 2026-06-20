@@ -101,27 +101,23 @@ export default function HomePage() {
   useEffect(() => {
     const SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY;
     if (!SITE_KEY) return;
-    const render = () => {
-      if (turnstileRef.current && window.turnstile) {
-        window.turnstile.render(turnstileRef.current, {
-          sitekey: SITE_KEY,
-          callback: (token) => { setTurnstileToken(token); setTurnstileReady(true); },
-          "expired-callback": () => { setTurnstileToken(null); setTurnstileReady(false); },
-          "error-callback": () => setTurnstileReady(true), // allow through on error
-          theme: "auto",
-        });
-      }
-    };
-    if (window.turnstile) {
-      render();
-    } else {
+    window.__tsSuccess = (token) => { setTurnstileToken(token); setTurnstileReady(true); };
+    window.__tsExpired = () => { setTurnstileToken(null); setTurnstileReady(false); };
+    window.__tsError = () => setTurnstileReady(true);
+    if (!document.getElementById("ts-script")) {
       const script = document.createElement("script");
-      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.id = "ts-script";
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
       script.async = true;
-      script.onload = render;
-      script.onerror = () => setTurnstileReady(true); // allow through if script fails
+      script.defer = true;
+      script.onerror = () => setTurnstileReady(true);
       document.head.appendChild(script);
     }
+    return () => {
+      delete window.__tsSuccess;
+      delete window.__tsExpired;
+      delete window.__tsError;
+    };
   }, []);
 
   useState(() => {
@@ -667,9 +663,16 @@ export default function HomePage() {
                 style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, pointerEvents: "none" }}
               />
               {process.env.REACT_APP_TURNSTILE_SITE_KEY && (
-                <div>
-                  <div ref={turnstileRef} style={{ marginBottom: 4 }} />
-                  {!turnstileReady && <div style={{ fontSize: 12, color: "var(--txt2)", marginBottom: 6 }}>Verifying you're human...</div>}
+                <div style={{ marginBottom: 4 }}>
+                  <div
+                    className="cf-turnstile"
+                    data-sitekey={process.env.REACT_APP_TURNSTILE_SITE_KEY}
+                    data-callback="__tsSuccess"
+                    data-expired-callback="__tsExpired"
+                    data-error-callback="__tsError"
+                    data-theme="auto"
+                  />
+                  {!turnstileReady && <div style={{ fontSize: 12, color: "var(--txt2)", marginTop: 4 }}>Verifying you're human...</div>}
                 </div>
               )}
               <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate} disabled={isGenerating}>
