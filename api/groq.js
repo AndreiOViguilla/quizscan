@@ -1,15 +1,31 @@
-// Simple per-IP rate limit: 15 requests/minute per instance
-const rateLimits = new Map();
+// Sliding window rate limit: 15 requests per 60s per IP
+const slidingWindows = new Map();
 function checkRateLimit(ip, max = 15, windowMs = 60000) {
   const now = Date.now();
-  const entry = rateLimits.get(ip) || { count: 0, reset: now + windowMs };
-  if (now > entry.reset) { entry.count = 0; entry.reset = now + windowMs; }
-  entry.count++;
-  rateLimits.set(ip, entry);
-  if (rateLimits.size > 500) {
-    for (const [k, v] of rateLimits) { if (now > v.reset) rateLimits.delete(k); }
+  const recent = (slidingWindows.get(ip) || []).filter(t => now - t < windowMs);
+  recent.push(now);
+  slidingWindows.set(ip, recent);
+  if (slidingWindows.size > 1000) {
+    for (const [k, v] of slidingWindows) {
+      if (v.every(t => now - t >= windowMs)) slidingWindows.delete(k);
+    }
   }
-  return entry.count <= max;
+  return recent.length <= max;
+}
+
+async function verifyTurnstile(token) {
+  const secret = process.env.TURNSTILE_SECRET;
+  if (!secret) return true; // skip in dev when not configured
+  if (!token) return false;
+  try {
+    const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret, response: token }),
+    });
+    const d = await r.json();
+    return d.success === true;
+  } catch { return false; }
 }
 
 module.exports = async function handler(req, res) {
@@ -30,8 +46,12 @@ module.exports = async function handler(req, res) {
   const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
   if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests. Please wait a minute." });
 
-  const { messages, model = "llama-3.3-70b-versatile", maxTokens = 8000 } = req.body;
+  const { messages, model = "llama-3.3-70b-versatile", maxTokens = 8000, cfToken } = req.body;
   if (!messages?.length) return res.status(400).json({ error: "Missing messages" });
+
+  if (!(await verifyTurnstile(cfToken))) {
+    return res.status(403).json({ error: "Human verification failed. Please try again." });
+  }
 
   const GROQ_KEY = process.env.GROQ_KEY;
   if (!GROQ_KEY) return res.status(500).json({ error: "GROQ_KEY not configured" });

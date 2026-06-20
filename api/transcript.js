@@ -1,17 +1,19 @@
 // api/transcript.js
 // Uses YouTube Data API v3 + timedtext for reliable transcript fetching
 
-const rateLimits = new Map();
+// Sliding window rate limit: 10 requests per 60s per IP
+const slidingWindows = new Map();
 function checkRateLimit(ip, max = 10, windowMs = 60000) {
   const now = Date.now();
-  const entry = rateLimits.get(ip) || { count: 0, reset: now + windowMs };
-  if (now > entry.reset) { entry.count = 0; entry.reset = now + windowMs; }
-  entry.count++;
-  rateLimits.set(ip, entry);
-  if (rateLimits.size > 500) {
-    for (const [k, v] of rateLimits) { if (now > v.reset) rateLimits.delete(k); }
+  const recent = (slidingWindows.get(ip) || []).filter(t => now - t < windowMs);
+  recent.push(now);
+  slidingWindows.set(ip, recent);
+  if (slidingWindows.size > 1000) {
+    for (const [k, v] of slidingWindows) {
+      if (v.every(t => now - t >= windowMs)) slidingWindows.delete(k);
+    }
   }
-  return entry.count <= max;
+  return recent.length <= max;
 }
 
 module.exports = async function handler(req, res) {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
 import { useSettings } from "../context/SettingsContext";
 import { useQuiz } from "../context/QuizContext";
@@ -87,10 +87,30 @@ export default function HomePage() {
   const [ytStatus, setYtStatus] = useState("");
   const [genStatus, setGenStatus] = useState("");
   const [draft, setDraft] = useState(null);
+  const [honeypot, setHoneypot] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState(null);
+  const pageLoadTime = useRef(Date.now());
 
   useEffect(() => {
     const saved = loadDraft();
     if (saved?.length) setDraft(saved);
+  }, []);
+
+  useEffect(() => {
+    const SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY;
+    if (!SITE_KEY) return;
+    window.__onTurnstileSuccess = (token) => setTurnstileToken(token);
+    window.__onTurnstileExpired = () => setTurnstileToken(null);
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+    return () => {
+      try { document.head.removeChild(script); } catch {}
+      delete window.__onTurnstileSuccess;
+      delete window.__onTurnstileExpired;
+    };
   }, []);
 
   useState(() => {
@@ -159,6 +179,9 @@ export default function HomePage() {
   };
 
   const generate = async () => {
+    if (honeypot) return; // bot filled the hidden field — silent drop
+    if (Date.now() - pageLoadTime.current < 3000) { setError("Please wait a moment before generating."); return; }
+    if (process.env.REACT_APP_TURNSTILE_SITE_KEY && !turnstileToken) { setError("Please complete the human verification."); return; }
     setError("");
     if (tab === "pdf" && !file) { setError("Please upload a PDF first."); return; }
     if (tab === "image" && !file) { setError("Please upload an image first."); return; }
@@ -235,7 +258,7 @@ export default function HomePage() {
         const urlPrompt = pageText
           ? `Generate exactly ${numQ} quiz questions from this webpage content.\n${typeInstr} ${langNote} ${jsonInstr}\n\n<content>\n${pageText}\n</content>`
           : `Generate exactly ${numQ} quiz questions about the topic of this URL: ${sanitizeUserInput(urlVal, 200)}. Use your knowledge about what this page likely contains. ${typeInstr} ${langNote} ${jsonInstr}`;
-        const raw = await generateText([systemMsg, { role: "user", content: urlPrompt }]);
+        const raw = await generateText([systemMsg, { role: "user", content: urlPrompt }], 8000, turnstileToken);
         await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "youtube") {
         setGenStatus("Fetching video transcript...");
@@ -314,13 +337,13 @@ export default function HomePage() {
           ytPrompt = `Generate exactly ${numQ} quiz questions about this YouTube video: ${sanitizeUserInput(ytVal, 200)}. Generate questions specifically about what this video covers. ${typeInstr} ${langNote} ${jsonInstr}`;
         }
 
-        const raw = await generateText([systemMsg, { role: "user", content: ytPrompt }]);
+        const raw = await generateText([systemMsg, { role: "user", content: ytPrompt }], 8000, turnstileToken);
         await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "topic") {
-        const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} quiz questions about: <content>${sanitizeUserInput(topicVal, 500)}</content>\n${typeInstr} ${langNote} ${jsonInstr}` }], numQ > 25 ? 8000 : 4000);
+        const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} quiz questions about: <content>${sanitizeUserInput(topicVal, 500)}</content>\n${typeInstr} ${langNote} ${jsonInstr}` }], numQ > 25 ? 8000 : 4000, turnstileToken);
         await startQuiz(parseQuestions(raw)); return;
       } else {
-        const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}\n\n<content>\n${text.trim().substring(0, 4000)}\n</content>` }]);
+        const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}\n\n<content>\n${text.trim().substring(0, 4000)}\n</content>` }], 8000, turnstileToken);
         await startQuiz(parseQuestions(raw)); return;
       }
 
@@ -337,6 +360,9 @@ export default function HomePage() {
       clearTimeout(warmupTimer);
       clearTimeout(slowTimer);
       setGenStatus("");
+      // Reset Turnstile so user gets a fresh token for next generation
+      setTurnstileToken(null);
+      try { window.turnstile?.reset?.(); } catch {}
     }
   };
 
@@ -623,6 +649,22 @@ export default function HomePage() {
               <p style={{ fontSize: 11, opacity: 0.45, margin: 0 }}>
                 {generated ? "Quiz generated successfully" : "AI will create questions from your content"}
               </p>
+              {/* Honeypot — invisible to humans, bots fill it */}
+              <input
+                value={honeypot} onChange={e => setHoneypot(e.target.value)}
+                tabIndex={-1} autoComplete="off" aria-hidden="true"
+                style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, pointerEvents: "none" }}
+              />
+              {process.env.REACT_APP_TURNSTILE_SITE_KEY && (
+                <div
+                  className="cf-turnstile"
+                  data-sitekey={process.env.REACT_APP_TURNSTILE_SITE_KEY}
+                  data-callback="__onTurnstileSuccess"
+                  data-expired-callback="__onTurnstileExpired"
+                  data-theme="auto"
+                  style={{ marginBottom: 8 }}
+                />
+              )}
               <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate} disabled={isGenerating}>
                 {isGenerating ? <><span className="spinner" />{genStatus || "Generating..."}</> : generated ? "Regenerate" : "Generate"}
               </button>

@@ -32,12 +32,12 @@ export async function groq(messages, model = "llama-3.3-70b-versatile", maxToken
 // ─── HUGGING FACE → GROQ FALLBACK ────────────────────────────────────────────
 const HF_MODEL = "Qwen/Qwen2.5-72B-Instruct";
 
-export async function generateText(messages, maxTokens = 8000) {
+export async function generateText(messages, maxTokens = 8000, cfToken = null) {
   const failures = [];
 
   // 1. Try HF (serverless → Space fallback handled in backend)
   try {
-    const bodyStr = JSON.stringify({ messages, model: HF_MODEL, maxTokens });
+    const bodyStr = JSON.stringify({ messages, model: HF_MODEL, maxTokens, cfToken });
     const sigHeaders = await signRequest(bodyStr);
     const res = await fetch("/api/generate", {
       method: "POST",
@@ -56,7 +56,7 @@ export async function generateText(messages, maxTokens = 8000) {
     const res = await fetch("/api/groq", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, model: "llama-3.3-70b-versatile", maxTokens }),
+      body: JSON.stringify({ messages, model: "llama-3.3-70b-versatile", maxTokens, cfToken }),
     });
     const data = await res.json();
     if (res.ok && data.content) return data.content;

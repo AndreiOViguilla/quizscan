@@ -1,17 +1,33 @@
 const crypto = require("crypto");
 
-// Simple per-IP rate limit: 10 requests/minute per instance
-const rateLimits = new Map();
+// Sliding window rate limit: 10 requests per 60s per IP
+const slidingWindows = new Map();
 function checkRateLimit(ip, max = 10, windowMs = 60000) {
   const now = Date.now();
-  const entry = rateLimits.get(ip) || { count: 0, reset: now + windowMs };
-  if (now > entry.reset) { entry.count = 0; entry.reset = now + windowMs; }
-  entry.count++;
-  rateLimits.set(ip, entry);
-  if (rateLimits.size > 500) {
-    for (const [k, v] of rateLimits) { if (now > v.reset) rateLimits.delete(k); }
+  const recent = (slidingWindows.get(ip) || []).filter(t => now - t < windowMs);
+  recent.push(now);
+  slidingWindows.set(ip, recent);
+  if (slidingWindows.size > 1000) {
+    for (const [k, v] of slidingWindows) {
+      if (v.every(t => now - t >= windowMs)) slidingWindows.delete(k);
+    }
   }
-  return entry.count <= max;
+  return recent.length <= max;
+}
+
+async function verifyTurnstile(token) {
+  const secret = process.env.TURNSTILE_SECRET;
+  if (!secret) return true;
+  if (!token) return false;
+  try {
+    const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret, response: token }),
+    });
+    const d = await r.json();
+    return d.success === true;
+  } catch { return false; }
 }
 
 function verifySignature(bodyStr, ts, sig) {
@@ -56,8 +72,12 @@ module.exports = async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { messages, model = "Qwen/Qwen2.5-72B-Instruct", maxTokens = 8000 } = req.body;
+  const { messages, model = "Qwen/Qwen2.5-72B-Instruct", maxTokens = 8000, cfToken } = req.body;
   if (!messages?.length) return res.status(400).json({ error: "Missing messages" });
+
+  if (!(await verifyTurnstile(cfToken))) {
+    return res.status(403).json({ error: "Human verification failed. Please try again." });
+  }
 
   // Server-side size limits
   if (messages.length > MAX_MESSAGES) return res.status(400).json({ error: "Too many messages" });
