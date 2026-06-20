@@ -23,14 +23,6 @@ module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  // Block cross-origin requests from unknown origins in production
-  if (ALLOWED_ORIGIN) {
-    const origin = req.headers["origin"] || req.headers["referer"] || "";
-    if (origin && !origin.startsWith(ALLOWED_ORIGIN)) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-  }
-
   const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
   if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests. Please wait a minute." });
 

@@ -52,13 +52,6 @@ module.exports = async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  if (ALLOWED_ORIGIN) {
-    const origin = req.headers["origin"] || req.headers["referer"] || "";
-    if (origin && !origin.startsWith(ALLOWED_ORIGIN)) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-  }
-
   // Rate limit by IP
   const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
   if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests. Please wait a minute." });
@@ -74,9 +67,6 @@ module.exports = async function handler(req, res) {
   const { messages, model = "Qwen/Qwen2.5-72B-Instruct", maxTokens = 8000, cfToken } = req.body;
   if (!messages?.length) return res.status(400).json({ error: "Missing messages" });
 
-  if (!(await verifyTurnstile(cfToken))) {
-    return res.status(403).json({ error: "Human verification failed. Please try again." });
-  }
 
   // Server-side size limits
   if (messages.length > MAX_MESSAGES) return res.status(400).json({ error: "Too many messages" });
