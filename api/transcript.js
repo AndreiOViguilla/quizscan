@@ -50,5 +50,65 @@ module.exports = async function handler(req, res) {
     } catch { continue; }
   }
 
+  // Fallback: timedtext API
+  const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+  for (const lang of ["en", "en-US", "en-GB", "fil", "tl"]) {
+    try {
+      const r = await fetch(`https://www.youtube.com/api/timedtext?v=${id}&lang=${lang}&fmt=json3`, {
+        headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9" }
+      });
+      if (!r.ok) continue;
+      const data = await r.json();
+      const events = (data?.events || []).filter(e => e.segs);
+      if (events.length > 5) {
+        const text = events.map(e => e.segs.map(s => s.utf8 || "").join("")).join(" ").replace(/\s+/g, " ").trim();
+        if (text.length > 200) return res.status(200).json({ videoId: id, text, lang, wordCount: text.split(" ").length, method: "timedtext" });
+      }
+    } catch { continue; }
+  }
+
+  // Method 3: Invidious public instances
+  const INVIDIOUS = [
+    "https://inv.nadeko.net",
+    "https://invidious.nerdvpn.de",
+    "https://iv.ggtyler.dev",
+  ];
+  for (const instance of INVIDIOUS) {
+    try {
+      const listRes = await fetch(`${instance}/api/v1/captions/${id}`, {
+        headers: { "User-Agent": UA },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!listRes.ok) continue;
+      const { captions } = await listRes.json();
+      if (!captions?.length) continue;
+      const track =
+        captions.find(c => c.languageCode?.startsWith("en")) ||
+        captions.find(c => c.languageCode?.startsWith("fil")) ||
+        captions[0];
+      if (!track?.url) continue;
+      const captionRes = await fetch(`${instance}${track.url}`, {
+        headers: { "User-Agent": UA },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!captionRes.ok) continue;
+      const xml = await captionRes.text();
+      const texts = [...xml.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(m =>
+        m[1]
+          .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+          .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\n/g, " ")
+      );
+      if (texts.length > 5) {
+        const text = texts.join(" ").replace(/\s+/g, " ").trim();
+        if (text.length > 200) {
+          return res.status(200).json({
+            videoId: id, text, lang: track.languageCode,
+            wordCount: text.split(" ").length, method: "invidious",
+          });
+        }
+      }
+    } catch { continue; }
+  }
+
   return res.status(404).json({ error: "No transcript found for this video. It may not have captions enabled." });
 };
