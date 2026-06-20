@@ -1,5 +1,5 @@
 // api/transcript.js
-// Uses YouTube Data API v3 + timedtext for reliable transcript fetching
+const { YoutubeTranscript } = require("youtube-transcript");
 
 // Sliding window rate limit: 10 requests per 60s per IP
 const slidingWindows = new Map();
@@ -46,7 +46,18 @@ module.exports = async function handler(req, res) {
   const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
   try {
-    // Step 1: Get video info from YouTube Data API
+    // Step 1: Try youtube-transcript library (fastest, no API key needed)
+    try {
+      const segments = await YoutubeTranscript.fetchTranscript(id, { lang: "en" });
+      if (segments?.length > 5) {
+        const text = segments.map(s => s.text).join(" ").replace(/\s+/g, " ").trim();
+        if (text.length > 200) {
+          return res.status(200).json({ videoId: id, text, lang: "en", wordCount: text.split(" ").length, method: "youtube-transcript" });
+        }
+      }
+    } catch {}
+
+    // Step 2: Get video info from YouTube Data API
     let videoTitle = "";
     let videoDesc = "";
     if (YT_KEY) {
