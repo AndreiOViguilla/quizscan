@@ -89,8 +89,9 @@ export default function HomePage() {
   const [draft, setDraft] = useState(null);
   const [honeypot, setHoneypot] = useState("");
   const [turnstileToken, setTurnstileToken] = useState(null);
-  const [turnstileReady, setTurnstileReady] = useState(!process.env.REACT_APP_TURNSTILE_SITE_KEY);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
   const turnstileRef = useRef(null);
+  const pendingGenerateRef = useRef(false);
   const pageLoadTime = useRef(Date.now());
 
   useEffect(() => {
@@ -99,6 +100,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    if (!showVerifyModal) return;
     const SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY;
     if (!SITE_KEY) return;
     let pollTimer = null;
@@ -110,9 +112,13 @@ export default function HomePage() {
         container._tsRendered = true;
         widgetId = window.turnstile.render(container, {
           sitekey: SITE_KEY,
-          callback: (token) => { setTurnstileToken(token); setTurnstileReady(true); },
-          "expired-callback": () => { setTurnstileToken(null); setTurnstileReady(false); },
-          "error-callback": () => setTurnstileReady(true),
+          callback: (token) => {
+            setTurnstileToken(token);
+            setShowVerifyModal(false);
+            if (pendingGenerateRef.current) { pendingGenerateRef.current = false; generate(token); }
+          },
+          "expired-callback": () => setTurnstileToken(null),
+          "error-callback": () => { setShowVerifyModal(false); },
           theme: "auto",
         });
       } else {
@@ -125,7 +131,7 @@ export default function HomePage() {
       script.id = "ts-script";
       script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
       script.async = true;
-      script.onerror = () => setTurnstileReady(true);
+      script.onerror = () => setShowVerifyModal(false);
       document.head.appendChild(script);
     }
 
@@ -136,8 +142,9 @@ export default function HomePage() {
       if (widgetId !== null && window.turnstile) {
         try { window.turnstile.remove(widgetId); } catch {}
       }
+      if (turnstileRef.current) delete turnstileRef.current._tsRendered;
     };
-  }, []);
+  }, [showVerifyModal]);
 
   useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -204,10 +211,15 @@ export default function HomePage() {
     return s;
   };
 
-  const generate = async () => {
-    if (honeypot) return; // bot filled the hidden field — silent drop
+  const generate = async (resolvedToken) => {
+    if (honeypot) return;
     if (Date.now() - pageLoadTime.current < 3000) { setError("Please wait a moment before generating."); return; }
-    if (process.env.REACT_APP_TURNSTILE_SITE_KEY && !turnstileToken) { setError("Please wait for verification to complete."); return; }
+    const cfToken = resolvedToken || turnstileToken;
+    if (process.env.REACT_APP_TURNSTILE_SITE_KEY && !cfToken) {
+      pendingGenerateRef.current = true;
+      setShowVerifyModal(true);
+      return;
+    }
     setError("");
     if (tab === "pdf" && !file) { setError("Please upload a PDF first."); return; }
     if (tab === "image" && !file) { setError("Please upload an image first."); return; }
@@ -284,7 +296,7 @@ export default function HomePage() {
         const urlPrompt = pageText
           ? `Generate exactly ${numQ} quiz questions from this webpage content.\n${typeInstr} ${langNote} ${jsonInstr}\n\n<content>\n${pageText}\n</content>`
           : `Generate exactly ${numQ} quiz questions about the topic of this URL: ${sanitizeUserInput(urlVal, 200)}. Use your knowledge about what this page likely contains. ${typeInstr} ${langNote} ${jsonInstr}`;
-        const raw = await generateText([systemMsg, { role: "user", content: urlPrompt }], 8000, turnstileToken);
+        const raw = await generateText([systemMsg, { role: "user", content: urlPrompt }], 8000, cfToken);
         await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "youtube") {
         setGenStatus("Fetching video transcript...");
@@ -363,13 +375,13 @@ export default function HomePage() {
           ytPrompt = `Generate exactly ${numQ} quiz questions about this YouTube video: ${sanitizeUserInput(ytVal, 200)}. Generate questions specifically about what this video covers. ${typeInstr} ${langNote} ${jsonInstr}`;
         }
 
-        const raw = await generateText([systemMsg, { role: "user", content: ytPrompt }], 8000, turnstileToken);
+        const raw = await generateText([systemMsg, { role: "user", content: ytPrompt }], 8000, cfToken);
         await startQuiz(parseQuestions(raw)); return;
       } else if (tab === "topic") {
-        const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} quiz questions about: <content>${sanitizeUserInput(topicVal, 500)}</content>\n${typeInstr} ${langNote} ${jsonInstr}` }], numQ > 25 ? 8000 : 4000, turnstileToken);
+        const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} quiz questions about: <content>${sanitizeUserInput(topicVal, 500)}</content>\n${typeInstr} ${langNote} ${jsonInstr}` }], numQ > 25 ? 8000 : 4000, cfToken);
         await startQuiz(parseQuestions(raw)); return;
       } else {
-        const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}\n\n<content>\n${text.trim().substring(0, 4000)}\n</content>` }], 8000, turnstileToken);
+        const raw = await generateText([systemMsg, { role: "user", content: `Generate exactly ${numQ} questions. ${typeInstr} ${langNote} ${jsonInstr}\n\n<content>\n${text.trim().substring(0, 4000)}\n</content>` }], 8000, cfToken);
         await startQuiz(parseQuestions(raw)); return;
       }
 
@@ -681,13 +693,7 @@ export default function HomePage() {
                 tabIndex={-1} autoComplete="off" aria-hidden="true"
                 style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, pointerEvents: "none" }}
               />
-              {process.env.REACT_APP_TURNSTILE_SITE_KEY && (
-                <div style={{ marginBottom: 4 }}>
-                  <div ref={turnstileRef} />
-                  {!turnstileReady && <div style={{ fontSize: 12, color: "var(--txt2)", marginTop: 4 }}>Verifying you're human...</div>}
-                </div>
-              )}
-              <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate} disabled={isGenerating}>
+              <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={() => generate()} disabled={isGenerating}>
                 {isGenerating ? <><span className="spinner" />{genStatus || "Generating..."}</> : generated ? "Regenerate" : "Generate"}
               </button>
               {genStatus && !isGenerating && <div className="alert-info" style={{ marginTop: 8, fontSize: 12 }}>{genStatus}</div>}
@@ -795,6 +801,29 @@ export default function HomePage() {
         </>
       )}
 
+    {/* Turnstile verification modal */}
+    {showVerifyModal && (
+      <div style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }} onClick={() => setShowVerifyModal(false)}>
+        <div style={{
+          background: "var(--bg2)", border: "1px solid var(--bdr,#3e3e3e)",
+          borderRadius: 14, padding: "28px 32px",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 16,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.4)", minWidth: 300,
+        }} onClick={e => e.stopPropagation()}>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>Verify you're human</div>
+          <div style={{ fontSize: 13, color: "var(--txt2)", textAlign: "center" }}>
+            Complete the quick check below to continue.
+          </div>
+          <div ref={turnstileRef} />
+          <button className="btn-secondary" style={{ fontSize: 12, padding: "6px 16px" }}
+            onClick={() => setShowVerifyModal(false)}>Cancel</button>
+        </div>
+      </div>
+    )}
     </div>
   );
 }
