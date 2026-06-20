@@ -87,6 +87,40 @@ module.exports = async function handler(req, res) {
     } catch (e) { log.push(`cf-worker: ${e.message?.slice(0, 60)}`); }
   }
 
+  // Method 4: Supadata API
+  const SUPADATA_KEY = process.env.SUPADATA_API_KEY;
+  if (SUPADATA_KEY) {
+    try {
+      const ytUrl = encodeURIComponent(`https://www.youtube.com/watch?v=${id}`);
+      const r = await fetch(`https://api.supadata.ai/v1/transcript?url=${ytUrl}`, {
+        headers: { "x-api-key": SUPADATA_KEY },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        if (data.content?.length > 5) {
+          const text = data.content.map(s => s.text).join(" ").replace(/\s+/g, " ").trim();
+          if (text.length > 200) {
+            return res.status(200).json({
+              videoId: id, text, lang: data.content[0]?.lang || "en",
+              wordCount: text.split(" ").length, method: "supadata",
+            });
+          }
+          log.push(`supadata: text too short (${text.length} chars)`);
+        } else if (data.jobId) {
+          log.push(`supadata: returned jobId (async, video too large)`);
+        } else {
+          log.push(`supadata: empty content`);
+        }
+      } else {
+        const err = await r.json().catch(() => ({}));
+        log.push(`supadata: HTTP ${r.status} - ${err.message || ""}`);
+      }
+    } catch (e) { log.push(`supadata: ${e.message?.slice(0, 60)}`); }
+  } else {
+    log.push("supadata: SUPADATA_API_KEY not set");
+  }
+
   return res.status(404).json({
     error: "No transcript found for this video. It may not have captions enabled.",
     ...(debug === "1" && { debug: log }),

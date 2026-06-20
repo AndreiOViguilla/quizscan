@@ -336,7 +336,7 @@ export default function HomePage() {
           for (const proxyUrl of proxiesToTry) {
             try {
               log(`Trying proxy: ${proxyUrl.substring(0, 50)}...`);
-              const proxyRes = await fetch(proxyUrl);
+              const proxyRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(5000) });
               log(`Proxy status: ${proxyRes.status}`);
               let html = "";
               const ct = proxyRes.headers.get("content-type") || "";
