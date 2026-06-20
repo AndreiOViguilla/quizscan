@@ -100,24 +100,35 @@ module.exports = async function handler(req, res) {
       });
       if (!captionRes.ok) { log.push(`invidious(${instance}): caption HTTP ${captionRes.status}`); continue; }
       const raw = await captionRes.text();
+      log.push(`invidious(${instance}): raw ${raw.length} chars, starts: ${raw.slice(0, 80).replace(/\n/g, " ")}`);
+
+      const htmlDecode = s => s
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\n/g, " ");
 
       let text = "";
+      // JSON3
       try {
         const data = JSON.parse(raw);
         const events = (data?.events || []).filter(e => e.segs);
-        if (events.length > 5) {
+        if (events.length > 5)
           text = events.map(e => e.segs.map(s => s.utf8 || "").join("")).join(" ").replace(/\s+/g, " ").trim();
-        }
       } catch {}
+      // SRV/XML: <text ...>content</text>
       if (!text) {
-        const matches = [...raw.matchAll(/<text[^>]*>([^<]*)<\/text>/g)];
-        if (matches.length > 5) {
-          text = matches.map(m =>
-            m[1]
-              .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-              .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\n/g, " ")
-          ).join(" ").replace(/\s+/g, " ").trim();
-        }
+        const m = [...raw.matchAll(/<text[^>]*>([^<]*)<\/text>/g)];
+        if (m.length > 5) text = m.map(x => htmlDecode(x[1])).join(" ").replace(/\s+/g, " ").trim();
+      }
+      // TTML: <p ...>content</p>
+      if (!text) {
+        const m = [...raw.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g)];
+        if (m.length > 5) text = m.map(x => htmlDecode(x[1].replace(/<[^>]+>/g, ""))).join(" ").replace(/\s+/g, " ").trim();
+      }
+      // VTT/SRT: plain text lines
+      if (!text) {
+        const lines = raw.split("\n")
+          .filter(l => l.trim() && !/^\d+$/.test(l.trim()) && !l.includes("-->") && !/^WEBVTT/.test(l.trim()));
+        if (lines.length > 5) text = lines.join(" ").replace(/\s+/g, " ").trim();
       }
 
       if (text.length > 200) {
@@ -126,7 +137,7 @@ module.exports = async function handler(req, res) {
           wordCount: text.split(" ").length, method: "invidious",
         });
       }
-      log.push(`invidious(${instance}): got caption but text too short (${text.length} chars)`);
+      log.push(`invidious(${instance}): parsed text too short (${text.length} chars)`);
     } catch (e) { log.push(`invidious(${instance}): ${e.message?.slice(0, 80)}`); }
   }
 
