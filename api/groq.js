@@ -43,7 +43,7 @@ module.exports = async function handler(req, res) {
 
 
 
-  const GROQ_KEY = process.env.GROQ_KEY;
+  const GROQ_KEY = process.env.GROQ_KEY || process.env.REACT_APP_GROQ_KEY;
   if (!GROQ_KEY) return res.status(500).json({ error: "GROQ_KEY not configured" });
 
   try {
