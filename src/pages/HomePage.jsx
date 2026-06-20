@@ -89,6 +89,8 @@ export default function HomePage() {
   const [draft, setDraft] = useState(null);
   const [honeypot, setHoneypot] = useState("");
   const [turnstileToken, setTurnstileToken] = useState(null);
+  const [turnstileReady, setTurnstileReady] = useState(!process.env.REACT_APP_TURNSTILE_SITE_KEY);
+  const turnstileRef = useRef(null);
   const pageLoadTime = useRef(Date.now());
 
   useEffect(() => {
@@ -100,12 +102,12 @@ export default function HomePage() {
     const SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY;
     if (!SITE_KEY) return;
     const render = () => {
-      const container = document.getElementById("turnstile-container");
-      if (container && window.turnstile) {
-        window.turnstile.render(container, {
+      if (turnstileRef.current && window.turnstile) {
+        window.turnstile.render(turnstileRef.current, {
           sitekey: SITE_KEY,
-          callback: (token) => setTurnstileToken(token),
-          "expired-callback": () => setTurnstileToken(null),
+          callback: (token) => { setTurnstileToken(token); setTurnstileReady(true); },
+          "expired-callback": () => { setTurnstileToken(null); setTurnstileReady(false); },
+          "error-callback": () => setTurnstileReady(true), // allow through on error
           theme: "auto",
         });
       }
@@ -117,6 +119,7 @@ export default function HomePage() {
       script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
       script.async = true;
       script.onload = render;
+      script.onerror = () => setTurnstileReady(true); // allow through if script fails
       document.head.appendChild(script);
     }
   }, []);
@@ -189,7 +192,7 @@ export default function HomePage() {
   const generate = async () => {
     if (honeypot) return; // bot filled the hidden field — silent drop
     if (Date.now() - pageLoadTime.current < 3000) { setError("Please wait a moment before generating."); return; }
-    if (process.env.REACT_APP_TURNSTILE_SITE_KEY && !turnstileToken) { setError("Please complete the human verification."); return; }
+    if (process.env.REACT_APP_TURNSTILE_SITE_KEY && !turnstileToken) { setError("Please wait for verification to complete."); return; }
     setError("");
     if (tab === "pdf" && !file) { setError("Please upload a PDF first."); return; }
     if (tab === "image" && !file) { setError("Please upload an image first."); return; }
@@ -664,7 +667,10 @@ export default function HomePage() {
                 style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, pointerEvents: "none" }}
               />
               {process.env.REACT_APP_TURNSTILE_SITE_KEY && (
-                <div id="turnstile-container" style={{ marginBottom: 8 }} />
+                <div>
+                  <div ref={turnstileRef} style={{ marginBottom: 4 }} />
+                  {!turnstileReady && <div style={{ fontSize: 12, color: "var(--txt2)", marginBottom: 6 }}>Verifying you're human...</div>}
+                </div>
               )}
               <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate} disabled={isGenerating}>
                 {isGenerating ? <><span className="spinner" />{genStatus || "Generating..."}</> : generated ? "Regenerate" : "Generate"}
