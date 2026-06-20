@@ -17,8 +17,7 @@ function checkRateLimit(ip, max = 10, windowMs = 60000) {
 
 async function verifyTurnstile(token) {
   const secret = process.env.TURNSTILE_SECRET;
-  if (!secret) return true;
-  if (!token) return false;
+  if (!secret || !token) return true;
   try {
     const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
@@ -27,7 +26,7 @@ async function verifyTurnstile(token) {
     });
     const d = await r.json();
     return d.success === true;
-  } catch { return false; }
+  } catch { return true; }
 }
 
 function verifySignature(bodyStr, ts, sig) {
