@@ -99,18 +99,26 @@ export default function HomePage() {
   useEffect(() => {
     const SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY;
     if (!SITE_KEY) return;
-    window.__onTurnstileSuccess = (token) => setTurnstileToken(token);
-    window.__onTurnstileExpired = () => setTurnstileToken(null);
-    const script = document.createElement("script");
-    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
-    script.async = true;
-    script.defer = true;
-    document.head.appendChild(script);
-    return () => {
-      try { document.head.removeChild(script); } catch {}
-      delete window.__onTurnstileSuccess;
-      delete window.__onTurnstileExpired;
+    const render = () => {
+      const container = document.getElementById("turnstile-container");
+      if (container && window.turnstile) {
+        window.turnstile.render(container, {
+          sitekey: SITE_KEY,
+          callback: (token) => setTurnstileToken(token),
+          "expired-callback": () => setTurnstileToken(null),
+          theme: "auto",
+        });
+      }
     };
+    if (window.turnstile) {
+      render();
+    } else {
+      const script = document.createElement("script");
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.onload = render;
+      document.head.appendChild(script);
+    }
   }, []);
 
   useState(() => {
@@ -656,14 +664,7 @@ export default function HomePage() {
                 style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, pointerEvents: "none" }}
               />
               {process.env.REACT_APP_TURNSTILE_SITE_KEY && (
-                <div
-                  className="cf-turnstile"
-                  data-sitekey={process.env.REACT_APP_TURNSTILE_SITE_KEY}
-                  data-callback="__onTurnstileSuccess"
-                  data-expired-callback="__onTurnstileExpired"
-                  data-theme="auto"
-                  style={{ marginBottom: 8 }}
-                />
+                <div id="turnstile-container" style={{ marginBottom: 8 }} />
               )}
               <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={generate} disabled={isGenerating}>
                 {isGenerating ? <><span className="spinner" />{genStatus || "Generating..."}</> : generated ? "Regenerate" : "Generate"}
