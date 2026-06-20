@@ -25,7 +25,7 @@ module.exports = async function handler(req, res) {
   const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
   if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests. Please wait a minute." });
 
-  const { videoId, url } = req.query;
+  const { videoId, url, debug } = req.query;
   let id = videoId;
   if (!id && url) {
     const match = url.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
@@ -33,6 +33,9 @@ module.exports = async function handler(req, res) {
   }
   if (!id) return res.status(400).json({ error: "Missing videoId or url" });
 
+  const log = [];
+
+  // Method 1: youtube-transcript library
   for (const lang of ["en", "en-US", "fil", null]) {
     try {
       const { YoutubeTranscript } = require("youtube-transcript");
@@ -47,24 +50,26 @@ module.exports = async function handler(req, res) {
           });
         }
       }
-    } catch { continue; }
+      log.push(`yt-lib(${lang}): ok but empty`);
+    } catch (e) { log.push(`yt-lib(${lang}): ${e.message?.slice(0, 80)}`); }
   }
 
-  // Fallback: timedtext API
+  // Method 2: timedtext API
   const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
   for (const lang of ["en", "en-US", "en-GB", "fil", "tl"]) {
     try {
       const r = await fetch(`https://www.youtube.com/api/timedtext?v=${id}&lang=${lang}&fmt=json3`, {
         headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9" }
       });
-      if (!r.ok) continue;
+      if (!r.ok) { log.push(`timedtext(${lang}): HTTP ${r.status}`); continue; }
       const data = await r.json();
       const events = (data?.events || []).filter(e => e.segs);
       if (events.length > 5) {
         const text = events.map(e => e.segs.map(s => s.utf8 || "").join("")).join(" ").replace(/\s+/g, " ").trim();
         if (text.length > 200) return res.status(200).json({ videoId: id, text, lang, wordCount: text.split(" ").length, method: "timedtext" });
       }
-    } catch { continue; }
+      log.push(`timedtext(${lang}): ok but ${events.length} events`);
+    } catch (e) { log.push(`timedtext(${lang}): ${e.message?.slice(0, 80)}`); }
   }
 
   // Method 3: Invidious public instances
@@ -81,23 +86,22 @@ module.exports = async function handler(req, res) {
         headers: { "User-Agent": UA },
         signal: AbortSignal.timeout(6000),
       });
-      if (!listRes.ok) continue;
+      if (!listRes.ok) { log.push(`invidious(${instance}): list HTTP ${listRes.status}`); continue; }
       const { captions } = await listRes.json();
-      if (!captions?.length) continue;
+      if (!captions?.length) { log.push(`invidious(${instance}): no captions`); continue; }
       const track =
         captions.find(c => c.languageCode?.startsWith("en")) ||
         captions.find(c => c.languageCode?.startsWith("fil")) ||
         captions[0];
-      if (!track?.url) continue;
+      if (!track?.url) { log.push(`invidious(${instance}): no url`); continue; }
       const captionRes = await fetch(`${instance}${track.url}`, {
         headers: { "User-Agent": UA },
         signal: AbortSignal.timeout(6000),
       });
-      if (!captionRes.ok) continue;
+      if (!captionRes.ok) { log.push(`invidious(${instance}): caption HTTP ${captionRes.status}`); continue; }
       const raw = await captionRes.text();
 
       let text = "";
-      // Try JSON3 format first
       try {
         const data = JSON.parse(raw);
         const events = (data?.events || []).filter(e => e.segs);
@@ -105,7 +109,6 @@ module.exports = async function handler(req, res) {
           text = events.map(e => e.segs.map(s => s.utf8 || "").join("")).join(" ").replace(/\s+/g, " ").trim();
         }
       } catch {}
-      // Fall back to XML format
       if (!text) {
         const matches = [...raw.matchAll(/<text[^>]*>([^<]*)<\/text>/g)];
         if (matches.length > 5) {
@@ -123,8 +126,12 @@ module.exports = async function handler(req, res) {
           wordCount: text.split(" ").length, method: "invidious",
         });
       }
-    } catch { continue; }
+      log.push(`invidious(${instance}): got caption but text too short (${text.length} chars)`);
+    } catch (e) { log.push(`invidious(${instance}): ${e.message?.slice(0, 80)}`); }
   }
 
-  return res.status(404).json({ error: "No transcript found for this video. It may not have captions enabled." });
+  return res.status(404).json({
+    error: "No transcript found for this video. It may not have captions enabled.",
+    ...(debug === "1" && { debug: log }),
+  });
 };
