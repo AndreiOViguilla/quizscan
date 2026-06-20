@@ -141,6 +141,28 @@ module.exports = async function handler(req, res) {
     } catch (e) { log.push(`invidious(${instance}): ${e.message?.slice(0, 80)}`); }
   }
 
+  // Method 4: Cloudflare Worker proxy
+  const CF_WORKER_URL = process.env.CF_WORKER_URL;
+  if (CF_WORKER_URL) {
+    try {
+      const r = await fetch(`${CF_WORKER_URL}?videoId=${id}`, {
+        headers: { "User-Agent": UA },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        if (data.text && data.text.length > 200) {
+          return res.status(200).json({ ...data, videoId: id });
+        }
+        log.push(`cf-worker: ok but empty`);
+      } else {
+        log.push(`cf-worker: HTTP ${r.status}`);
+      }
+    } catch (e) { log.push(`cf-worker: ${e.message?.slice(0, 80)}`); }
+  } else {
+    log.push("cf-worker: CF_WORKER_URL not set");
+  }
+
   return res.status(404).json({
     error: "No transcript found for this video. It may not have captions enabled.",
     ...(debug === "1" && { debug: log }),
