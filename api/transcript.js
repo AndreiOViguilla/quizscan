@@ -70,8 +70,10 @@ module.exports = async function handler(req, res) {
   // Method 3: Invidious public instances
   const INVIDIOUS = [
     "https://inv.nadeko.net",
+    "https://yewtu.be",
     "https://invidious.nerdvpn.de",
     "https://iv.ggtyler.dev",
+    "https://invidious.privacyredirect.com",
   ];
   for (const instance of INVIDIOUS) {
     try {
@@ -92,20 +94,34 @@ module.exports = async function handler(req, res) {
         signal: AbortSignal.timeout(6000),
       });
       if (!captionRes.ok) continue;
-      const xml = await captionRes.text();
-      const texts = [...xml.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(m =>
-        m[1]
-          .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-          .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\n/g, " ")
-      );
-      if (texts.length > 5) {
-        const text = texts.join(" ").replace(/\s+/g, " ").trim();
-        if (text.length > 200) {
-          return res.status(200).json({
-            videoId: id, text, lang: track.languageCode,
-            wordCount: text.split(" ").length, method: "invidious",
-          });
+      const raw = await captionRes.text();
+
+      let text = "";
+      // Try JSON3 format first
+      try {
+        const data = JSON.parse(raw);
+        const events = (data?.events || []).filter(e => e.segs);
+        if (events.length > 5) {
+          text = events.map(e => e.segs.map(s => s.utf8 || "").join("")).join(" ").replace(/\s+/g, " ").trim();
         }
+      } catch {}
+      // Fall back to XML format
+      if (!text) {
+        const matches = [...raw.matchAll(/<text[^>]*>([^<]*)<\/text>/g)];
+        if (matches.length > 5) {
+          text = matches.map(m =>
+            m[1]
+              .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+              .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\n/g, " ")
+          ).join(" ").replace(/\s+/g, " ").trim();
+        }
+      }
+
+      if (text.length > 200) {
+        return res.status(200).json({
+          videoId: id, text, lang: track.languageCode,
+          wordCount: text.split(" ").length, method: "invidious",
+        });
       }
     } catch { continue; }
   }
