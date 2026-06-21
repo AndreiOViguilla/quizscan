@@ -95,7 +95,7 @@ export default function EditPage() {
     <div className="page">
       <button className="back-btn" onClick={() => { setReturnToSettings(true); navigate("home"); }}>← Back to Settings</button>
       <h2 className="page-heading">Review & Edit Questions</h2>
-      <p className="page-sub">// fix any AI mistakes before starting — click any field to edit</p>
+      <p className="page-sub">Fix any AI mistakes before starting — click any field to edit</p>
 
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 14 }}>Quiz Settings</div>

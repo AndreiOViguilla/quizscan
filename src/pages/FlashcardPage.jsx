@@ -30,7 +30,7 @@ export default function FlashcardPage() {
           <h2 className="page-heading" style={{ fontSize: 36, marginBottom: 8 }}>
             {fcKnown.size === questions.length ? "Perfect!" : `${fcKnown.size} / ${questions.length} Known`}
           </h2>
-          <p className="page-sub">// deck complete</p>
+          <p className="page-sub">Deck complete</p>
           <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
             <button className="btn-primary" onClick={() => { setCurrent(0); setFlipped(false); setFcKnown(new Set()); }}>Restart</button>
             {fcKnown.size < questions.length && (

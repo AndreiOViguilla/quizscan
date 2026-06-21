@@ -12,7 +12,7 @@ export default function StudyPage() {
     <div className="page">
       <BackButton to="home" />
       <h2 className="page-heading">Study Mode</h2>
-      <p className="page-sub">// {questions.length} cards — question & answer side by side</p>
+      <p className="page-sub">{questions.length} cards — question & answer side by side</p>
       <div style={{ marginBottom: 20 }}>
         <button className="btn-secondary" onClick={() => { setMode("quiz"); resetQuizState(); quizStartTime.current = Date.now(); navigate("edit"); }}>
           Take Quiz Instead →

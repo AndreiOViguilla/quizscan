@@ -158,7 +158,7 @@ export function makeGlobalStyles(dark) {
 
     /* ── TABLE ── */
     .data-table { width: 100%; border-collapse: collapse; }
-    .data-table th { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: ${v.txt2}; text-align: left; padding: 10px 14px; border-bottom: 1px solid ${v.bdr}; }
+    .data-table th { font-size: 12px; font-weight: 600; color: ${v.txt2}; text-align: left; padding: 10px 14px; border-bottom: 1px solid ${v.bdr}; }
     .data-table td { padding: 14px; border-bottom: 1px solid ${v.bdr}; font-size: 13px; color: ${v.txt}; }
     .data-table tr:hover td { background: ${v.bg3}; }
     .table-empty { text-align: center; padding: 60px; color: ${v.dim}; font-size: 13px; }
@@ -168,14 +168,14 @@ export function makeGlobalStyles(dark) {
     .score-ring svg { transform: rotate(-90deg); }
     .score-ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
     .score-pct { font-size: 32px; font-weight: 700; color: ${v.txt}; line-height: 1; }
-    .score-sub { font-size: 10px; color: ${v.txt2}; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; margin-top: 3px; }
+    .score-sub { font-size: 11px; color: ${v.txt2}; font-weight: 500; margin-top: 3px; }
 
     /* ── QUIZ ── */
     .quiz-progress-bar { width: 100%; height: 2px; background: ${v.bdr}; border-radius: 2px; margin-bottom: 24px; overflow: hidden; }
     .quiz-progress-fill { height: 100%; background: ${v.txt2}; border-radius: 2px; transition: width .4s ease; }
     .timer-bar-wrap { width: 100%; height: 3px; background: ${v.bdr}; border-radius: 3px; margin-bottom: 16px; overflow: hidden; }
     .timer-bar { height: 100%; border-radius: 3px; transition: width 1s linear, background 1s; }
-    .q-type-label { font-size: 11px; color: ${v.dim}; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 14px; }
+    .q-type-label { font-size: 11px; color: ${v.dim}; font-weight: 600; margin-bottom: 14px; }
     .question-text { font-size: 19px; font-weight: 600; line-height: 1.5; color: ${v.txt}; margin-bottom: 22px; }
     .choices { display: flex; flex-direction: column; gap: 8px; }
     .choice-btn { background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 10px; padding: 14px 18px; color: ${v.txt}; font-family: 'Instrument Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; transition: all .15s; display: flex; align-items: center; gap: 12px; }
@@ -221,7 +221,7 @@ export function makeGlobalStyles(dark) {
     .fc-face { position: absolute; inset: 0; border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 36px; backface-visibility: hidden; -webkit-backface-visibility: hidden; text-align: center; }
     .fc-front { background: ${v.bg2}; border: 1px solid ${v.bdr}; }
     .fc-back { background: ${v.bg3}; border: 1px solid ${v.bdr2}; transform: rotateY(180deg); }
-    .fc-face-label { font-size: 10px; color: ${v.dim}; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; font-weight: 600; }
+    .fc-face-label { font-size: 11px; color: ${v.dim}; margin-bottom: 16px; font-weight: 500; }
     .fc-back .fc-face-label { color: ${v.txt2}; }
     .fc-face-question { font-size: 18px; font-weight: 600; color: ${v.txt}; line-height: 1.5; }
     .fc-face-answer { font-size: 20px; font-weight: 700; color: ${v.txt}; line-height: 1.4; }
@@ -235,7 +235,7 @@ export function makeGlobalStyles(dark) {
     .stats-row { display: flex; gap: 12px; flex-wrap: wrap; }
     .stat-box { background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 12px; padding: 16px 24px; min-width: 80px; text-align: center; flex: 1; }
     .stat-num { font-size: 28px; font-weight: 700; color: ${v.txt}; }
-    .stat-lbl { font-size: 10px; color: ${v.txt2}; letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; font-weight: 600; }
+    .stat-lbl { font-size: 11px; color: ${v.txt2}; margin-top: 4px; font-weight: 500; }
 
     /* ── REVIEW ── */
     .review-item { background: ${v.bg2}; border-left: 3px solid ${v.bdr}; padding: 14px 18px; margin-bottom: 8px; border-radius: 0 8px 8px 0; }
@@ -260,7 +260,7 @@ export function makeGlobalStyles(dark) {
 
     /* ── EDIT ── */
     .edit-q-card { background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 12px; padding: 18px; margin-bottom: 14px; }
-    .edit-q-num { font-size: 11px; color: ${v.txt2}; letter-spacing: 1px; margin-bottom: 8px; text-transform: uppercase; font-weight: 600; }
+    .edit-q-num { font-size: 11px; color: ${v.txt2}; margin-bottom: 8px; font-weight: 500; }
     .edit-choice-row { display: flex; gap: 7px; align-items: center; margin-bottom: 6px; }
     .edit-choice-letter { width: 26px; height: 26px; border: 1px solid ${v.bdr}; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: ${v.txt2}; flex-shrink: 0; font-weight: 600; }
     .edit-correct-btn { padding: 3px 9px; border-radius: 6px; font-size: 10px; cursor: pointer; border: 1px solid ${v.bdr}; background: transparent; color: ${v.dim}; font-weight: 500; flex-shrink: 0; }
@@ -271,14 +271,14 @@ export function makeGlobalStyles(dark) {
     .loading-title { font-size: 22px; font-weight: 600; color: ${v.txt}; animation: pulse 1.5s ease-in-out infinite; }
     .loading-bar-wrap { width: 280px; height: 2px; background: ${v.bdr}; margin: 28px auto 14px; border-radius: 2px; overflow: hidden; }
     .loading-bar { height: 100%; background: ${v.txt2}; animation: bar-fill 3s ease-out forwards; border-radius: 2px; }
-    .loading-hint { font-size: 12px; color: ${v.dim}; letter-spacing: 1px; text-transform: uppercase; font-weight: 500; }
+    .loading-hint { font-size: 12px; color: ${v.dim}; font-weight: 500; }
 
     /* ── STUDY ── */
     .study-card { background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 12px; padding: 24px; margin-bottom: 12px; display: flex; gap: 24px; }
     .study-q-side { flex: 1; }
     .study-divider { width: 1px; background: ${v.bdr}; flex-shrink: 0; border-radius: 2px; }
     .study-a-side { flex: 1; }
-    .study-side-label { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; font-weight: 700; color: ${v.txt2}; }
+    .study-side-label { font-size: 11px; margin-bottom: 8px; font-weight: 600; color: ${v.txt2}; }
     .study-q-text { font-size: 15px; font-weight: 600; color: ${v.txt}; line-height: 1.5; }
     .study-a-text { font-size: 15px; font-weight: 600; color: ${v.txt}; line-height: 1.5; }
     .study-explanation { font-size: 12px; color: ${v.dim}; margin-top: 6px; line-height: 1.6; }
@@ -290,7 +290,8 @@ export function makeGlobalStyles(dark) {
     .home-sub { color: ${v.dim}; font-size: 14px; margin-bottom: 40px; line-height: 1.6; }
     .home-modes { display: flex; gap: 10px; margin-bottom: 32px; flex-wrap: wrap; justify-content: center; }
     .mode-card { flex: 1; min-width: 140px; background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 12px; padding: 18px 16px; cursor: pointer; transition: all .15s; text-align: center; }
-    .mode-card:hover, .mode-card.active { border-color: ${v.bdr2}; background: ${v.bg3}; }
+    .mode-card:hover { border-color: ${v.bdr2}; background: ${v.bg3}; }
+    .mode-card.active { border-color: ${v.txt}; background: ${v.bg3}; }
     .mode-card-icon { font-size: 20px; margin-bottom: 8px; color: ${v.txt2}; }
     .mode-card-title { font-size: 13px; font-weight: 700; color: ${v.txt}; margin-bottom: 3px; }
     .mode-card-desc { font-size: 11px; color: ${v.dim}; }
