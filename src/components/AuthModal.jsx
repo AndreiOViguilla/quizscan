@@ -50,6 +50,8 @@ export default function AuthModal({ onClose }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [resetStep, setResetStep] = useState(1); // 1: email, 2: otp
+  const [otpCode, setOtpCode] = useState("");
   const [cfToken, setCfToken] = useState(null);
   const tsRef = useRef(null);
   const tsWidgetId = useRef(null);
@@ -158,18 +160,43 @@ export default function AuthModal({ onClose }) {
     setLoading(false);
   };
 
-  const handleReset = async () => {
+  const handleSendOtp = async () => {
     setError(""); setLoading(true);
     try {
-      await resetPassword(email);
+      const r = await fetch("/api/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await r.json();
+      if (!r.ok) { setError(data.error || "Failed to send code."); setLoading(false); return; }
+      setResetStep(2);
     } catch {
-      // Silently ignore — don't reveal whether email exists
+      setError("Network error. Try again.");
     }
-    setResetSent(true);
     setLoading(false);
   };
 
-  const switchTab = (t) => { setTab(t); setError(""); setResetSent(false); };
+  const handleVerifyOtp = async () => {
+    setError(""); setLoading(true);
+    try {
+      const r = await fetch("/api/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, otp: otpCode }),
+      });
+      const data = await r.json();
+      if (!r.ok) { setError(data.error || "Verification failed."); setLoading(false); return; }
+      // OTP correct — send Firebase reset link
+      try { await resetPassword(email); } catch { /* silently ignore — don't reveal if email exists */ }
+      setResetSent(true);
+    } catch {
+      setError("Network error. Try again.");
+    }
+    setLoading(false);
+  };
+
+  const switchTab = (t) => { setTab(t); setError(""); setResetSent(false); setResetStep(1); setOtpCode(""); };
 
   return (
     <div style={{
@@ -186,7 +213,7 @@ export default function AuthModal({ onClose }) {
           {tab === "reset" ? "Reset Password" : tab === "signup" ? "Create Account" : "Sign In"}
         </div>
         <div style={{ fontSize: 13, opacity: 0.5, marginBottom: 24 }}>
-          {tab === "reset" ? "Enter your email to receive a reset link" :
+          {tab === "reset" ? (resetStep === 2 ? "Check your email for the 6-digit code" : "Enter your email to receive a verification code") :
            tab === "signup" ? "Join to share quizzes and save scores globally" :
            "Sign in to share quizzes and appear on the global leaderboard"}
         </div>
@@ -196,16 +223,45 @@ export default function AuthModal({ onClose }) {
         {tab === "reset" ? (
           resetSent ? (
             <div className="alert-info" style={{ marginBottom: 16 }}>
-              If an account exists with this email, a reset link has been sent.
+              Check your inbox — a password reset link has been sent to <strong>{email}</strong>.
             </div>
+          ) : resetStep === 2 ? (
+            <>
+              <div style={{ fontSize: 13, opacity: 0.55, marginBottom: 16, lineHeight: 1.5 }}>
+                A 6-digit code was sent to <strong style={{ opacity: 1 }}>{email}</strong>. Check your inbox and enter it below.
+              </div>
+              <label className="field-label">Verification Code</label>
+              <input
+                className="field-input"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="000000"
+                value={otpCode}
+                onChange={e => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onKeyDown={e => e.key === "Enter" && otpCode.length === 6 && handleVerifyOtp()}
+                style={{ marginBottom: 16, fontSize: 22, letterSpacing: 8, textAlign: "center" }}
+                autoFocus
+              />
+              <button className="btn-primary" style={{ width: "100%", padding: "12px", marginBottom: 10 }}
+                onClick={handleVerifyOtp} disabled={loading || otpCode.length !== 6}>
+                {loading ? "Verifying..." : "Verify Code"}
+              </button>
+              <button style={{ background: "none", border: "none", color: "inherit", opacity: 0.45, fontSize: 12, cursor: "pointer", padding: 0, width: "100%", textAlign: "center" }}
+                onClick={() => { setResetStep(1); setOtpCode(""); setError(""); }}>
+                Resend or change email
+              </button>
+            </>
           ) : (
             <>
               <label className="field-label">Email</label>
               <input className="field-input" type="email" placeholder="you@email.com"
-                value={email} onChange={e => setEmail(e.target.value)} style={{ marginBottom: 16 }} />
+                value={email} onChange={e => setEmail(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && email && handleSendOtp()}
+                style={{ marginBottom: 16 }} />
               <button className="btn-primary" style={{ width: "100%", padding: "12px", marginBottom: 12 }}
-                onClick={handleReset} disabled={loading || !email}>
-                {loading ? "Sending..." : "Send Reset Link"}
+                onClick={handleSendOtp} disabled={loading || !email}>
+                {loading ? "Sending..." : "Send Code"}
               </button>
             </>
           )
