@@ -180,6 +180,19 @@ export default function FindPage() {
   const handleComment = async () => {
     if (!user || !commentText.trim()) return;
     if (SITE_KEY && !cfToken) { return; }
+    try {
+      const modRes = await fetch("/api/moderate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: commentText }),
+      });
+      const modData = await modRes.json();
+      if (modData.flagged) {
+        alert("Your comment was flagged as inappropriate and was not posted.");
+        resetTurnstile();
+        return;
+      }
+    } catch {}
     await addComment(selectedQuiz.id, user, commentText);
     setCommentText("");
     resetTurnstile();
@@ -386,11 +399,14 @@ export default function FindPage() {
               ))}
               {user ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {SITE_KEY && (
+                  {SITE_KEY && !cfToken && (
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div ref={tsRef} />
-                      {!cfToken && <span style={{ fontSize: 11, opacity: 0.4 }}>Complete verification to post</span>}
+                      <div ref={tsRef} style={{ overflow: "hidden", borderRadius: 8 }} />
+                      <span style={{ fontSize: 11, opacity: 0.4 }}>Verify to post</span>
                     </div>
+                  )}
+                  {SITE_KEY && cfToken && (
+                    <div style={{ fontSize: 11, color: "#4caf50" }}>✓ Verified</div>
                   )}
                   <div style={{ display: "flex", gap: 8 }}>
                     <input className="field-input" placeholder="Add a comment..." value={commentText}
