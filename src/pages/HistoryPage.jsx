@@ -30,8 +30,8 @@ export default function HistoryPage() {
             {history.map((e, i) => (
               <tr key={i}>
                 <td style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title}</td>
-                <td style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700, color: dark ? "#ececec" : "#0d0d0d" }}>{e.pct}% ({e.correct}/{e.total})</td>
-                <td style={{ opacity: .6, fontSize: 12, fontFamily: "'Space Mono',monospace" }}>{e.date}</td>
+                <td style={{ fontWeight: 700, color: dark ? "#ececec" : "#0d0d0d" }}>{e.pct}% ({e.correct}/{e.total})</td>
+                <td style={{ opacity: .6, fontSize: 12 }}>{e.date}</td>
                 <td>
                   <button className="btn-secondary" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => replay(e)}>
                     Replay

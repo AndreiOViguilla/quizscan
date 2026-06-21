@@ -355,7 +355,7 @@ export default function QuizPage() {
             <div style={{ fontSize: 36, marginBottom: 12 }}>⚠</div>
             <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 8, color: "#f59e0b" }}>Tab Switch Detected</div>
             <div style={{ fontSize: 13, opacity: 0.65, marginBottom: 6 }}>You left the quiz tab. The timer was paused.</div>
-            <div style={{ fontSize: 12, opacity: 0.4, marginBottom: 24, fontFamily: "'Space Mono',monospace" }}>
+            <div style={{ fontSize: 12, opacity: 0.4, marginBottom: 24 }}>
               {tabSwitches} switch{tabSwitches !== 1 ? "es" : ""} this session
             </div>
             <button className="btn-primary" style={{ width: "100%", padding: 12 }} onClick={resumeQuiz}>Resume Quiz</button>
@@ -365,7 +365,7 @@ export default function QuizPage() {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
         <div>
-          <div style={{ fontSize: 11, opacity: 0.5, letterSpacing: 1, textTransform: "uppercase" }}>Question</div>
+          <div style={{ fontSize: 11, opacity: 0.5 }}>Question</div>
           <div style={{ fontSize: 24, fontWeight: 700 }}>
             {String(current + 1).padStart(2, "0")} / {String(questions.length).padStart(2, "0")}
           </div>
@@ -379,7 +379,7 @@ export default function QuizPage() {
             </div>
           )}
           {gameMode === "speedrun" && (
-            <span style={{ fontFamily: "'Space Mono',monospace", fontSize: 13, fontWeight: 700, color: "var(--txt2)" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--txt2)" }}>
               {elapsedFmt}
             </span>
           )}

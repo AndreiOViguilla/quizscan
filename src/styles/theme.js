@@ -110,7 +110,7 @@ export function makeGlobalStyles(dark) {
 
     /* ── CARDS ── */
     .card { background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 12px; padding: 24px; margin-bottom: 16px; }
-    .card-sm { background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 8px; padding: 14px 18px; margin-bottom: 10px; }
+    .card-sm { background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 8px; padding: 16px; margin-bottom: 10px; }
 
     /* ── BUTTONS ── */
     .btn-primary { background: ${acc}; color: ${dark ? "#212121" : "#ffffff"}; border: none; padding: 11px 24px; font-family: 'Instrument Sans', sans-serif; font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 8px; transition: all .15s; white-space: nowrap; }
@@ -268,7 +268,7 @@ export function makeGlobalStyles(dark) {
 
     /* ── LOADING ── */
     .loading-screen { text-align: center; padding: 80px 0; }
-    .loading-title { font-size: 22px; font-weight: 600; color: ${v.txt}; animation: pulse 1.5s ease-in-out infinite; }
+    .loading-title { font-size: 22px; font-weight: 600; color: ${v.txt}; }
     .loading-bar-wrap { width: 280px; height: 2px; background: ${v.bdr}; margin: 28px auto 14px; border-radius: 2px; overflow: hidden; }
     .loading-bar { height: 100%; background: ${v.txt2}; animation: bar-fill 3s ease-out forwards; border-radius: 2px; }
     .loading-hint { font-size: 12px; color: ${v.dim}; font-weight: 500; }

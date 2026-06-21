@@ -127,9 +127,9 @@ export default function ResultsPage() {
 
       {(diffCounts.easy || diffCounts.medium || diffCounts.hard) > 0 && (
         <div style={{ display: "flex", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
-          {diffCounts.easy > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: dark ? "#2f2f2f" : "#f0f0f0", color: dark ? "#b4b4b4" : "#444444", border: `1px solid ${dark ? "#4a4a4a" : "#e5e5e5"}`, fontSize: 12, fontFamily: "'Space Mono',monospace" }}>Easy: {diffCounts.easy}</span>}
-          {diffCounts.medium > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: dark ? "#1f1400" : "#fffbeb", color: "#f59e0b", border: "1px solid #f59e0b", fontSize: 12, fontFamily: "'Space Mono',monospace" }}>Medium: {diffCounts.medium}</span>}
-          {diffCounts.hard > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: dark ? "#2d1b1b" : "#fef2f2", color: "#ef4444", border: "1px solid #ef4444", fontSize: 12, fontFamily: "'Space Mono',monospace" }}>Hard: {diffCounts.hard}</span>}
+          {diffCounts.easy > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: dark ? "#2f2f2f" : "#f0f0f0", color: dark ? "#b4b4b4" : "#444444", border: `1px solid ${dark ? "#4a4a4a" : "#e5e5e5"}`, fontSize: 12 }}>Easy: {diffCounts.easy}</span>}
+          {diffCounts.medium > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: dark ? "#1f1400" : "#fffbeb", color: "#f59e0b", border: "1px solid #f59e0b", fontSize: 12 }}>Medium: {diffCounts.medium}</span>}
+          {diffCounts.hard > 0 && <span style={{ padding: "5px 14px", borderRadius: 20, background: dark ? "#2d1b1b" : "#fef2f2", color: "#ef4444", border: "1px solid #ef4444", fontSize: 12 }}>Hard: {diffCounts.hard}</span>}
         </div>
       )}
 
@@ -163,7 +163,7 @@ export default function ResultsPage() {
               <div className="review-q">
                 {i + 1}. {q.question}
                 {diff && <span style={{ fontSize: 10, opacity: .6 }}> [{diff}]</span>}
-                {a?.timeTaken > 0 && <span style={{ fontSize: 10, opacity: .45, marginLeft: 8, fontFamily: "'Space Mono',monospace" }}>{a.timeTaken}s{String(i) === slowestIdx && answeredList.length > 2 ? " (slowest)" : ""}</span>}
+                {a?.timeTaken > 0 && <span style={{ fontSize: 10, opacity: .45, marginLeft: 8 }}>{a.timeTaken}s{String(i) === slowestIdx && answeredList.length > 2 ? " (slowest)" : ""}</span>}
               </div>
               <div className="review-your">Your answer: {ua}</div>
               {!a?.correct && <div className="review-correct">+ Correct: {dc}</div>}

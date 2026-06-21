@@ -17,8 +17,8 @@ export default function FlashcardPage() {
     <div className="page">
       <BackButton to="home" />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 12, color: dark ? "#b4b4b4" : "#444444", letterSpacing: 2 }}>
-          CARD {Math.min(current + 1, questions.length)} / {questions.length}
+        <div style={{ fontSize: 12, color: dark ? "#b4b4b4" : "#444444" }}>
+          Card {Math.min(current + 1, questions.length)} / {questions.length}
         </div>
         <div className="badge">+ {fcKnown.size} known</div>
       </div>

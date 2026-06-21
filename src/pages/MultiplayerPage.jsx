@@ -97,15 +97,15 @@ export default function MultiplayerPage() {
         {mpStatus && mpStatus !== "room-closed"
           ? mpStatus
           : isHost
-            ? `${playerCount}/${MAX_PLAYERS} player(s) connected — share the code above!`
+            ? `${playerCount}/${MAX_PLAYERS} ${playerCount === 1 ? "player" : "players"} connected — share the code above!`
             : "Connected! Waiting for host to start..."}
       </div>
-      {mpError && <div className="alert-error">! {mpError}</div>}
+      {mpError && <div className="alert-error">{mpError}</div>}
 
       {isHost && (
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--txt2)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 }}>
-            Pace Mode
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--txt2)", marginBottom: 8 }}>
+            Pace mode
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <button
