@@ -36,9 +36,10 @@ export function Confetti({ active }) {
 }
 
 export function Header() {
-  const { navigate, page, dark, toggleDark } = useApp();
+  const { navigate, page, dark, toggleDark, showAuthModal, setShowAuthModal } = useApp();
   const { user } = useAuth();
-  const [showAuth, setShowAuth] = useState(false);
+  const showAuth = showAuthModal;
+  const setShowAuth = setShowAuthModal;
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 

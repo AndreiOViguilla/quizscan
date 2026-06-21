@@ -56,7 +56,7 @@ const MODES = [
 ];
 
 export default function HomePage() {
-  const { navigate, error, setError } = useApp();
+  const { navigate, error, setError, setShowAuthModal } = useApp();
   const {
     mode, setMode, tab, setTab, file, setFile, text, setText,
     urlVal, setUrlVal, ytVal, setYtVal, topicVal, setTopicVal,
@@ -72,6 +72,7 @@ export default function HomePage() {
     mpRealtimeRef, setMpCode, setMpMode, setMpPlayers, setMyMpName, setMpSyncMode,
   } = useMultiplayer();
 
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [drag, setDrag] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -184,6 +185,11 @@ export default function HomePage() {
   const startQuiz = async (qs) => {
     setQuestions(qs);
     saveDraft(qs);
+    if (!user) {
+      const count = parseInt(localStorage.getItem("qs-guest-quizzes") || "0") + 1;
+      localStorage.setItem("qs-guest-quizzes", count);
+      if (count >= 2) setShowLoginPrompt(true);
+    }
     setDraft(null);
     resetQuizState();
     quizStartTime.current = Date.now();
@@ -499,8 +505,9 @@ export default function HomePage() {
               </button>
               <button className="btn-secondary" style={{ padding: "12px 20px" }}
                 onClick={async () => {
+                  if (!user) { setShowAuthModal(true); return; }
                   const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                  await shareQuizPublicly(generated, topic, playerName || "Anonymous");
+                  await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
                   setShared(true);
                 }}>
                 {shared ? "Shared!" : "Share Publicly"}
@@ -700,8 +707,9 @@ export default function HomePage() {
               {generated && (
                 <button className="btn-secondary" style={{ width: "100%", padding: "8px", fontSize: 12 }}
                   onClick={async () => {
+                    if (!user) { setShowAuthModal(true); return; }
                     const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                    await shareQuizPublicly(generated, topic, playerName || "Anonymous");
+                    await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
                     setShared(true);
                   }}>
                   {shared ? "Shared!" : "Share to Find Page"}
@@ -737,7 +745,7 @@ export default function HomePage() {
               className="btn-secondary"
               style={{ width: "100%", marginTop: 10, padding: "11px" }}
               onClick={async () => {
-                if (!user) { setError("Please sign in to share quizzes publicly."); return; }
+                if (!user) { setShowAuthModal(true); return; }
                 const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
                 await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous");
                 setShared(true);
@@ -821,6 +829,34 @@ export default function HomePage() {
           <div ref={turnstileRef} />
           <button className="btn-secondary" style={{ fontSize: 12, padding: "6px 16px" }}
             onClick={() => setShowVerifyModal(false)}>Cancel</button>
+        </div>
+      </div>
+    )}
+
+    {showLoginPrompt && !user && (
+      <div style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+      }} onClick={() => setShowLoginPrompt(false)}>
+        <div style={{
+          background: "var(--bg2)", border: "1px solid var(--bdr,#3e3e3e)",
+          borderRadius: 16, padding: "32px", maxWidth: 360, width: "100%",
+          display: "flex", flexDirection: "column", gap: 12,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+        }} onClick={e => e.stopPropagation()}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Enjoying QuizScan?</div>
+          <div style={{ fontSize: 13, opacity: 0.6, lineHeight: 1.5 }}>
+            Sign in to save your quizzes, appear on the leaderboard, and share with others.
+          </div>
+          <button className="btn-primary" style={{ padding: "11px", marginTop: 4 }}
+            onClick={() => { setShowLoginPrompt(false); setShowAuthModal(true); }}>
+            Sign in
+          </button>
+          <button className="btn-secondary" style={{ padding: "9px", fontSize: 13 }}
+            onClick={() => setShowLoginPrompt(false)}>
+            Maybe later
+          </button>
         </div>
       </div>
     )}
