@@ -1,3 +1,53 @@
+const BLOCKED = [
+  /\bf[\W_]*u[\W_]*c[\W_]*k/i,
+  /\bs[\W_]*h[\W_]*i[\W_]*t/i,
+  /\ba[\W_]*s[\W_]*s[\W_]*h[\W_]*o[\W_]*l[\W_]*e/i,
+  /\bb[\W_]*i[\W_]*t[\W_]*c[\W_]*h/i,
+  /\bc[\W_]*u[\W_]*n[\W_]*t\b/i,
+  /\bn[\W_]*i[\W_]*g[\W_]*g[\W_]*[ae]/i,
+  /\bf[\W_]*a[\W_]*g[\W_]*g/i,
+  /\bporn(ograph\w*)?/i,
+  /\bxxx\b/i,
+  /\bhentai\b/i,
+  /\bsex\b/i,
+  /\bnude[s]?\b/i,
+  /\bnaked\b/i,
+  /\bchild\s+(porn|sex|nude|naked)\b/i,
+  /\bhow\s+to\s+(make|build|synthesize|create)\s+(bomb|drug|meth|cocaine|explosiv)/i,
+  /\bhow\s+to\s+(kill|murder|poison|assault)\s+(a\s+)?(person|someone|people|human)/i,
+  /\bsuicide\s+(method|instruction|how\s+to|step)/i,
+  // Tagalog profanity
+  /\bputa[ng\s]+ina\b/i,
+  /putangina/i,
+  /\bputcha\b/i,
+  /\bpucha\b/i,
+  /\bkingina\b/i,
+  /\bkupal\b/i,
+  /\btarantado\b/i,
+  /\bhinayupak\b/i,
+  /pakshet/i,
+  /pakingshet/i,
+  /\bpakyu\b/i,
+  /\bhindot\b/i,
+  /\bkantot\b/i,
+  /\bjakol\b/i,
+  /\bbilat\b/i,
+  /\byawa\b/i,
+  /\bputragis\b/i,
+  /\btite\b/i,
+  /\bpuke\b/i,
+  /\bpekpek\b/i,
+  /\bbobo\b/i,
+  /\btanga\b/i,
+  /\bgago\b/i,
+  /\bputa\b/i,
+  /\bsuso\b/i,
+  /\bulol\b/i,
+  /\binutile\b/i,
+  /\bbwisit\b/i,
+  /\bpwet\b/i,
+];
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGIN || "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -9,6 +59,12 @@ module.exports = async function handler(req, res) {
   if (!text || typeof text !== "string") return res.status(400).json({ error: "Missing text" });
   if (text.length > 1000) return res.status(400).json({ error: "Text too long" });
 
+  // Regex layer — catches common slurs/explicit words immediately
+  if (BLOCKED.some(pat => pat.test(text))) {
+    return res.status(200).json({ flagged: true });
+  }
+
+  // OpenAI layer — catches context-aware harmful content
   const key = process.env.OPENAI_API_KEY;
   if (!key) return res.status(200).json({ flagged: false });
 
