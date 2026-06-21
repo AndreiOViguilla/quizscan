@@ -101,7 +101,16 @@ export default function HomePage() {
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const turnstileRef = useRef(null);
   const pendingGenerateRef = useRef(false);
+  const pendingActionRef = useRef(null);
   const pageLoadTime = useRef(Date.now());
+
+  const requireVerify = (action) => {
+    const SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY;
+    if (!SITE_KEY) { action(null); return; }
+    if (turnstileToken) { const tok = turnstileToken; setTurnstileToken(null); action(tok); return; }
+    pendingActionRef.current = action;
+    setShowVerifyModal(true);
+  };
 
   useEffect(() => {
     const saved = loadDraft();
@@ -124,7 +133,14 @@ export default function HomePage() {
           callback: (token) => {
             setTurnstileToken(token);
             setShowVerifyModal(false);
-            if (pendingGenerateRef.current) { pendingGenerateRef.current = false; generate(token); }
+            if (pendingGenerateRef.current) {
+              pendingGenerateRef.current = false;
+              generate(token);
+            } else if (pendingActionRef.current) {
+              const action = pendingActionRef.current;
+              pendingActionRef.current = null;
+              action(token);
+            }
           },
           "expired-callback": () => setTurnstileToken(null),
           "error-callback": () => { setShowVerifyModal(false); },
@@ -493,6 +509,10 @@ export default function HomePage() {
     const code = mpJoinCode?.trim().toUpperCase();
     const name = playerName?.trim() || "Player";
     if (!code || code.length !== 4) return setMpError("Enter a valid 4-letter room code.");
+    requireVerify(() => doJoin(code, name));
+  };
+
+  const doJoin = async (code, name) => {
     try {
       setMpError("");
       const storedKey = sessionStorage.getItem(`qs-mp-${code}`) || undefined;
@@ -566,11 +586,13 @@ export default function HomePage() {
                 Generate again
               </button>
               <button className="btn-secondary" style={{ padding: "12px 20px" }}
-                onClick={async () => {
+                onClick={() => {
                   if (!user) { setShowAuthModal(true); return; }
-                  const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                  await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
-                  setShared(true);
+                  requireVerify(async () => {
+                    const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
+                    await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
+                    setShared(true);
+                  });
                 }}>
                 {shared ? "Shared!" : "Share Publicly"}
               </button>
@@ -770,11 +792,13 @@ export default function HomePage() {
               {genStatus && !isGenerating && <div className="alert-info" style={{ marginTop: 8, fontSize: 12 }}>{genStatus}</div>}
               {generated && (
                 <button className="btn-secondary" style={{ width: "100%", padding: "8px", fontSize: 12 }}
-                  onClick={async () => {
+                  onClick={() => {
                     if (!user) { setShowAuthModal(true); return; }
-                    const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                    await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
-                    setShared(true);
+                    requireVerify(async () => {
+                      const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
+                      await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
+                      setShared(true);
+                    });
                   }}>
                   {shared ? "Shared!" : "Share to Find Page"}
                 </button>
@@ -808,11 +832,13 @@ export default function HomePage() {
             <button
               className="btn-secondary"
               style={{ width: "100%", marginTop: 10, padding: "11px" }}
-              onClick={async () => {
+              onClick={() => {
                 if (!user) { setShowAuthModal(true); return; }
-                const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous");
-                setShared(true);
+                requireVerify(async () => {
+                  const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
+                  await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
+                  setShared(true);
+                });
               }}
             >
               {shared ? "Shared to Find Page!" : "Share Publicly"}

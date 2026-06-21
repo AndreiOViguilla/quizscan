@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
 import { useQuiz } from "../context/QuizContext";
 import { useAuth } from "../context/AuthContext";
@@ -56,6 +56,53 @@ export default function FindPage() {
   const [reportReason, setReportReason] = useState("");
   const [showReport, setShowReport] = useState(false);
   const [likedIds, setLikedIds] = useState(() => JSON.parse(localStorage.getItem("qs_liked") || "[]"));
+  const [cfToken, setCfToken] = useState(null);
+  const tsRef = useRef(null);
+  const tsWidgetId = useRef(null);
+  const SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY;
+
+  // Render Turnstile when modal opens, destroy when it closes
+  useEffect(() => {
+    if (!SITE_KEY || !selectedQuiz) return;
+    let pollTimer = null;
+    const tryRender = () => {
+      const container = tsRef.current;
+      if (window.turnstile && container && !container._tsRendered) {
+        container._tsRendered = true;
+        tsWidgetId.current = window.turnstile.render(container, {
+          sitekey: SITE_KEY,
+          callback: (token) => setCfToken(token),
+          "expired-callback": () => setCfToken(null),
+          "error-callback": () => setCfToken(null),
+          theme: "auto", size: "compact",
+        });
+      } else { pollTimer = setTimeout(tryRender, 200); }
+    };
+    if (!document.getElementById("ts-script")) {
+      const s = document.createElement("script");
+      s.id = "ts-script";
+      s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      s.async = true;
+      document.head.appendChild(s);
+    }
+    tryRender();
+    return () => {
+      clearTimeout(pollTimer);
+      if (tsWidgetId.current !== null && window.turnstile) {
+        try { window.turnstile.remove(tsWidgetId.current); } catch {}
+      }
+      if (tsRef.current) delete tsRef.current._tsRendered;
+      tsWidgetId.current = null;
+      setCfToken(null);
+    };
+  }, [selectedQuiz, SITE_KEY]);
+
+  const resetTurnstile = () => {
+    if (tsWidgetId.current !== null && window.turnstile) {
+      try { window.turnstile.reset(tsWidgetId.current); } catch {}
+    }
+    setCfToken(null);
+  };
 
   useEffect(() => { loadQuizzes(); }, []);
 
@@ -119,16 +166,20 @@ export default function FindPage() {
 
   const handleReport = async () => {
     if (!reportReason.trim()) return;
+    if (SITE_KEY && !cfToken) { alert("Please complete the verification first."); return; }
     await reportQuiz(selectedQuiz.id, reportReason, user?.uid);
     setShowReport(false);
     setReportReason("");
+    resetTurnstile();
     alert("Reported. Thank you!");
   };
 
   const handleComment = async () => {
     if (!user || !commentText.trim()) return;
+    if (SITE_KEY && !cfToken) { return; }
     await addComment(selectedQuiz.id, user, commentText);
     setCommentText("");
+    resetTurnstile();
     const c = await getComments(selectedQuiz.id);
     setComments(c);
   };
@@ -331,12 +382,21 @@ export default function FindPage() {
                 </div>
               ))}
               {user ? (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input className="field-input" placeholder="Add a comment..." value={commentText}
-                    onChange={e => setCommentText(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && handleComment()}
-                    style={{ flex: 1 }} />
-                  <button className="btn-primary" onClick={handleComment}>Post</button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {SITE_KEY && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div ref={tsRef} />
+                      {!cfToken && <span style={{ fontSize: 11, opacity: 0.4 }}>Complete verification to post</span>}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input className="field-input" placeholder="Add a comment..." value={commentText}
+                      onChange={e => setCommentText(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && handleComment()}
+                      style={{ flex: 1 }} />
+                    <button className="btn-primary" onClick={handleComment}
+                      disabled={SITE_KEY ? !cfToken : false}>Post</button>
+                  </div>
                 </div>
               ) : (
                 <div style={{ fontSize: 12, opacity: 0.4 }}>Sign in to comment</div>
