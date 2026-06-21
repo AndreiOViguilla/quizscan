@@ -8,6 +8,7 @@ import { groq, generateText, parseQuestions, createRoom, joinRoom, FirebaseListe
 import { saveDraft, loadDraft } from "../utils/storage";
 import { shareQuizPublicly } from "./FindPage";
 import { useAuth } from "../context/AuthContext";
+import { getIdToken } from "../utils/firebase";
 import { LANGUAGES } from "../utils/constants";
 
 const TABS = [
@@ -598,7 +599,7 @@ export default function HomePage() {
                   if (!user) { setShowAuthModal(true); return; }
                   requireVerify(async () => {
                     const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                    const idToken = await user.getIdToken();
+                    const idToken = await getIdToken();
                     await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid, idToken);
                     setShared(true);
                   });
@@ -805,7 +806,7 @@ export default function HomePage() {
                 if (!user) { setShowAuthModal(true); return; }
                 requireVerify(async () => {
                   const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                  const idToken = await user.getIdToken();
+                  const idToken = await getIdToken();
                     await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid, idToken);
                   setShared(true);
                 });

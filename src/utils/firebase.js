@@ -48,6 +48,11 @@ export async function onAuthChange(callback) {
   return onAuthStateChanged(auth, callback);
 }
 
+export async function getIdToken() {
+  const { auth } = await getFirebase();
+  return auth.currentUser ? auth.currentUser.getIdToken() : null;
+}
+
 export async function resetPassword(email) {
   const { auth } = await getFirebase();
   const { sendPasswordResetEmail } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
