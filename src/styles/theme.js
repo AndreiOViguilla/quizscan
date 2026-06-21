@@ -148,7 +148,8 @@ export function makeGlobalStyles(dark) {
     .toggle-label { font-size: 13px; color: ${v.txt2}; font-weight: 500; }
 
     /* ── TABS ── */
-    .tabs { display: flex; border-bottom: 1px solid ${v.bdr}; width: 100%; gap: 0; overflow-x: auto; }
+    .tabs { display: flex; border-bottom: 1px solid ${v.bdr}; width: 100%; gap: 0; overflow-x: auto; scrollbar-width: none; }
+    .tabs::-webkit-scrollbar { display: none; }
     .tab-btn { padding: 8px 16px 10px; background: transparent; border: none; border-bottom: 2px solid transparent; color: ${v.dim}; font-family: 'Instrument Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: color .15s, border-color .15s; border-radius: 0; margin-bottom: -1px; flex-shrink: 0; }
     .tab-btn.active { background: transparent; color: ${v.txt}; font-weight: 600; border-bottom-color: ${v.txt}; box-shadow: none; }
     .tab-btn:hover:not(.active) { color: ${v.txt2}; background: transparent; }
