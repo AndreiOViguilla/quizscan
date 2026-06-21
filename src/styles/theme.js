@@ -148,13 +148,13 @@ export function makeGlobalStyles(dark) {
     .toggle-label { font-size: 13px; color: ${v.txt2}; font-weight: 500; }
 
     /* ── TABS ── */
-    .tabs { display: flex; background: ${v.bg3}; border-radius: 8px; padding: 3px; gap: 2px; width: fit-content; flex-wrap: wrap; }
-    .tab-btn { padding: 7px 16px; background: transparent; border: none; color: ${v.dim}; font-family: 'Instrument Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .15s; border-radius: 6px; }
-    .tab-btn.active { background: ${v.bg2}; color: ${v.txt}; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
-    .tab-btn:hover:not(.active) { color: ${v.txt}; }
+    .tabs { display: flex; border-bottom: 1px solid ${v.bdr}; width: 100%; gap: 0; overflow-x: auto; }
+    .tab-btn { padding: 8px 16px 10px; background: transparent; border: none; border-bottom: 2px solid transparent; color: ${v.dim}; font-family: 'Instrument Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: color .15s, border-color .15s; border-radius: 0; margin-bottom: -1px; flex-shrink: 0; }
+    .tab-btn.active { background: transparent; color: ${v.txt}; font-weight: 600; border-bottom-color: ${v.txt}; box-shadow: none; }
+    .tab-btn:hover:not(.active) { color: ${v.txt2}; background: transparent; }
 
     /* ── BADGE ── */
-    .badge { display: inline-flex; align-items: center; gap: 5px; background: ${v.bg3}; border: 1px solid ${v.bdr}; color: ${v.txt2}; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; background: ${v.bg3}; color: ${v.txt2}; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
 
     /* ── TABLE ── */
     .data-table { width: 100%; border-collapse: collapse; }
@@ -178,18 +178,18 @@ export function makeGlobalStyles(dark) {
     .q-type-label { font-size: 11px; color: ${v.dim}; font-weight: 600; margin-bottom: 14px; }
     .question-text { font-size: 19px; font-weight: 600; line-height: 1.5; color: ${v.txt}; margin-bottom: 22px; }
     .choices { display: flex; flex-direction: column; gap: 8px; }
-    .choice-btn { background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 10px; padding: 14px 18px; color: ${v.txt}; font-family: 'Instrument Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; transition: all .15s; display: flex; align-items: center; gap: 12px; }
-    .choice-btn:hover:not(:disabled) { border-color: ${v.bdr2}; background: ${v.bg3}; }
-    .choice-btn.selected { border-color: ${v.bdr2}; background: ${v.bg3}; }
-    .choice-btn.correct { border-color: ${v.bdr2}; background: ${v.bg3}; font-weight: 600; }
+    .choice-btn { background: ${v.bg3}; border: 1.5px solid transparent; border-radius: 10px; padding: 14px 18px; color: ${v.txt}; font-family: 'Instrument Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; transition: all .15s; display: flex; align-items: center; gap: 12px; }
+    .choice-btn:hover:not(:disabled) { background: ${v.bg2}; border-color: ${v.bdr}; }
+    .choice-btn.selected { background: ${v.bg2}; border-color: ${v.bdr2}; }
+    .choice-btn.correct { background: ${v.bg3}; border-color: ${v.bdr2}; font-weight: 600; }
     .choice-btn.wrong { border-color: #ef4444; background: ${dark ? "#2d1b1b" : "#fef2f2"}; color: ${dark ? "#fca5a5" : "#dc2626"}; }
     .choice-btn.eliminated { opacity: .3; cursor: not-allowed; text-decoration: line-through; }
     .choice-btn:disabled { cursor: default; }
     .choice-letter { width: 26px; height: 26px; border: 1.5px solid ${v.bdr}; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; color: ${v.txt2}; }
     .tf-choices { display: flex; gap: 12px; }
-    .tf-btn { flex: 1; background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 10px; padding: 20px; color: ${v.txt}; font-size: 16px; font-weight: 600; cursor: pointer; transition: all .15s; }
-    .tf-btn:hover:not(:disabled) { border-color: ${v.bdr2}; background: ${v.bg3}; }
-    .tf-btn.correct { border-color: ${v.bdr2}; background: ${v.bg3}; }
+    .tf-btn { flex: 1; background: ${v.bg3}; border: 1.5px solid transparent; border-radius: 10px; padding: 20px; color: ${v.txt}; font-size: 16px; font-weight: 600; cursor: pointer; transition: all .15s; }
+    .tf-btn:hover:not(:disabled) { background: ${v.bg2}; border-color: ${v.bdr}; }
+    .tf-btn.correct { background: ${v.bg3}; border-color: ${v.bdr2}; }
     .tf-btn.wrong { border-color: #ef4444; background: ${dark ? "#2d1b1b" : "#fef2f2"}; color: ${dark ? "#fca5a5" : "#dc2626"}; }
     .tf-btn:disabled { cursor: default; }
     .fill-input-wrap { display: flex; gap: 10px; margin-top: 4px; }
@@ -254,12 +254,12 @@ export function makeGlobalStyles(dark) {
     /* ── MULTIPLAYER ── */
     .mp-room-code { font-size: 52px; font-weight: 700; color: ${v.txt}; letter-spacing: 10px; text-align: center; margin: 24px 0 8px; font-family: monospace; }
     .mp-status-text { font-size: 13px; color: ${v.txt2}; text-align: center; margin-bottom: 20px; }
-    .mp-player-row { background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 10px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .mp-player-row { background: ${v.bg3}; border-radius: 8px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
     .mp-player-name { font-weight: 600; color: ${v.txt}; font-size: 14px; }
     .mp-player-score { font-size: 13px; color: ${v.txt2}; font-weight: 700; }
 
     /* ── EDIT ── */
-    .edit-q-card { background: ${v.bg2}; border: 1px solid ${v.bdr}; border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+    .edit-q-card { background: ${v.bg3}; border-radius: 10px; padding: 18px; margin-bottom: 10px; }
     .edit-q-num { font-size: 11px; color: ${v.txt2}; margin-bottom: 8px; font-weight: 500; }
     .edit-choice-row { display: flex; gap: 7px; align-items: center; margin-bottom: 6px; }
     .edit-choice-letter { width: 26px; height: 26px; border: 1px solid ${v.bdr}; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: ${v.txt2}; flex-shrink: 0; font-weight: 600; }

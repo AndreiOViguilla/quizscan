@@ -84,6 +84,7 @@ export default function HomePage() {
   const [drag, setDrag] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [generated, setGenerated] = useState(null);
   const [quickJoin, setQuickJoin] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -714,131 +715,91 @@ export default function HomePage() {
 
       ) : (
         <>
-          <button className="back-btn" onClick={() => setShowSettings(false)}>Back</button>
+          <button className="back-btn" onClick={() => setShowSettings(false)}>← Back</button>
           <div className="page-heading">Settings</div>
-          <div className="page-sub">Customize your {mode === "study" ? "study guide" : mode === "flashcard" ? "flashcards" : "quiz"}</div>
 
-          <div className="card">
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
-              <div>
-                <label className="field-label">Questions</label>
-                <select className="field-select" value={numQ} onChange={e => setNumQ(Number(e.target.value))}>
-                  {[5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </div>
-              {mode !== "study" && (
-                <div>
-                  <label className="field-label">Type</label>
-                  <select className="field-select" value={qType} onChange={e => setQType(e.target.value)}>
-                    <option value="mixed">Mixed</option>
-                    <option value="mcq">Multiple Choice</option>
-                    <option value="tf">True / False</option>
-                    <option value="fill">Fill in Blank</option>
-                  </select>
-                </div>
-              )}
-              <div>
-                <label className="field-label">Language</label>
-                <select className="field-select" value={lang} onChange={e => setLang(e.target.value)}>
-                  {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="field-label">Your Name</label>
-                <input className="field-input" style={{ width: 140 }} placeholder="e.g. Alex"
-                  value={playerName} onChange={e => setPlayerName(e.target.value)} />
-              </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+            <div>
+              <label className="field-label">Questions</label>
+              <select className="field-select" value={numQ} onChange={e => setNumQ(Number(e.target.value))}>
+                {[5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
             </div>
-            {mode === "quiz" && (
-              <div className="toggles-row">
-                <Toggle on={useTimer} onChange={setUseTimer} label="Timer (30s)" />
-                <Toggle on={useStreak} onChange={setUseStreak} label="Streak" />
-                <Toggle on={useSounds} onChange={setUseSounds} label="Sounds" />
-                {tab === "topic" && <Toggle on={autoDiff} onChange={setAutoDiff} label="Auto-difficulty" />}
-                <Toggle on={mpAfterGenerate} onChange={setMpAfterGenerate} label="Host room after generate" />
+            {mode !== "study" && (
+              <div>
+                <label className="field-label">Type</label>
+                <select className="field-select" value={qType} onChange={e => setQType(e.target.value)}>
+                  <option value="mixed">Mixed</option>
+                  <option value="mcq">Multiple Choice</option>
+                  <option value="tf">True / False</option>
+                  <option value="fill">Fill in Blank</option>
+                </select>
               </div>
             )}
+            <div>
+              <label className="field-label">Language</label>
+              <select className="field-select" value={lang} onChange={e => setLang(e.target.value)}>
+                {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="field-label">Your Name</label>
+              <input className="field-input" style={{ width: 140 }} placeholder="e.g. Alex"
+                value={playerName} onChange={e => setPlayerName(e.target.value)} />
+            </div>
           </div>
+
+          {mode === "quiz" && (
+            <div className="toggles-row" style={{ marginBottom: 12 }}>
+              <Toggle on={useTimer} onChange={setUseTimer} label="Timer (30s)" />
+              <Toggle on={useStreak} onChange={setUseStreak} label="Streak" />
+              <Toggle on={useSounds} onChange={setUseSounds} label="Sounds" />
+            </div>
+          )}
+          {mode === "quiz" && (
+            <div style={{ marginBottom: 24 }}>
+              <button style={{ background: "none", border: "none", color: "var(--txt2)", fontSize: 12, cursor: "pointer", padding: "4px 0", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4 }}
+                onClick={() => setShowAdvanced(a => !a)}>
+                {showAdvanced ? "▾" : "▸"} Advanced
+              </button>
+              {showAdvanced && (
+                <div className="toggles-row" style={{ marginTop: 10 }}>
+                  {tab === "topic" && <Toggle on={autoDiff} onChange={setAutoDiff} label="Auto-difficulty" />}
+                  <Toggle on={mpAfterGenerate} onChange={setMpAfterGenerate} label="Host room after generate" />
+                </div>
+              )}
+            </div>
+          )}
 
           {error && <div className="alert-error">{error}</div>}
 
-          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-            <div style={{
-              flex: 1, border: "1px solid var(--bdr,#3e3e3e)", borderRadius: 10,
-              padding: "16px", display: "flex", flexDirection: "column", gap: 10,
-              background: "var(--bg2)"
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {generated ? (
-                  <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
-                    <circle cx="10" cy="10" r="9" stroke="currentColor" strokeWidth="1.5" opacity="0.4"/>
-                    <path d="M6 10l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
-                    <circle cx="10" cy="10" r="9" stroke="currentColor" strokeWidth="1.5" opacity="0.3"/>
-                    <path d="M10 6v4M10 14h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  </svg>
-                )}
-                <span style={{ fontWeight: 600, fontSize: 13 }}>
-                  {generated ? `${generated.length} questions ready` : "Generate Quiz"}
-                </span>
-              </div>
-              <p style={{ fontSize: 11, opacity: 0.45, margin: 0 }}>
-                {generated ? "Quiz generated successfully" : "AI will create questions from your content"}
-              </p>
-              {/* Honeypot — invisible to humans, bots fill it */}
-              <input
-                value={honeypot} onChange={e => setHoneypot(e.target.value)}
-                tabIndex={-1} autoComplete="off" aria-hidden="true"
-                style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, pointerEvents: "none" }}
-              />
-              <button className={generated ? "btn-secondary" : "btn-primary"} style={{ width: "100%", padding: "10px" }} onClick={() => generate()} disabled={isGenerating}>
-                {isGenerating ? <><span className="spinner" />{genStatus || "Generating..."}</> : generated ? "Regenerate" : "Generate"}
-              </button>
-              {genStatus && !isGenerating && <div className="alert-info" style={{ marginTop: 8, fontSize: 12 }}>{genStatus}</div>}
-              {generated && (
-                <button className="btn-secondary" style={{ width: "100%", padding: "8px", fontSize: 12 }}
-                  onClick={() => {
-                    if (!user) { setShowAuthModal(true); return; }
-                    requireVerify(async () => {
-                      const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                      await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
-                      setShared(true);
-                    });
-                  }}>
-                  {shared ? "Shared!" : "Share to Find Page"}
-                </button>
-              )}
-            </div>
+          {/* Honeypot — invisible to humans, bots fill it */}
+          <input
+            value={honeypot} onChange={e => setHoneypot(e.target.value)}
+            tabIndex={-1} autoComplete="off" aria-hidden="true"
+            style={{ position: "absolute", left: "-9999px", opacity: 0, height: 0, pointerEvents: "none" }}
+          />
 
-            <div style={{
-              flex: 1, border: `1px solid ${generated ? "var(--bdr2,#686868)" : "var(--bdr,#3e3e3e)"}`, borderRadius: 10,
-              padding: "16px", display: "flex", flexDirection: "column", gap: 10,
-              background: "var(--bg2)", opacity: generated ? 1 : 0.5
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
-                  <circle cx="10" cy="10" r="9" stroke="currentColor" strokeWidth="1.5" opacity="0.3"/>
-                  <path d="M8 7l5 3-5 3V7z" fill="currentColor" opacity="0.7"/>
-                </svg>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>Start Quiz</span>
-              </div>
-              <p style={{ fontSize: 11, opacity: 0.45, margin: 0 }}>
-                Review and edit questions before starting
-              </p>
-              <button className="btn-primary" style={{ width: "100%", padding: "10px" }}
-                disabled={!generated}
-                onClick={() => { if (generated) navigate("edit"); }}>
-                Review & Start
-              </button>
-            </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button
+              className={generated ? "btn-secondary" : "btn-primary"}
+              style={{ flex: 1, padding: "13px" }}
+              onClick={() => generate()}
+              disabled={isGenerating}>
+              {isGenerating ? <><span className="spinner" />{genStatus || "Generating..."}</> : generated ? "Regenerate" : "Generate Quiz"}
+            </button>
+            <button
+              className={generated ? "btn-primary" : "btn-secondary"}
+              style={{ flex: 1, padding: "13px" }}
+              disabled={!generated}
+              onClick={() => { if (generated) navigate("edit"); }}>
+              Review & Start →
+            </button>
           </div>
-
           {generated && (
             <button
               className="btn-secondary"
-              style={{ width: "100%", marginTop: 10, padding: "11px" }}
+              style={{ width: "100%", marginTop: 8, padding: "11px" }}
               onClick={() => {
                 if (!user) { setShowAuthModal(true); return; }
                 requireVerify(async () => {
@@ -846,18 +807,15 @@ export default function HomePage() {
                   await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
                   setShared(true);
                 });
-              }}
-            >
+              }}>
               {shared ? "Shared to Find Page!" : "Share Publicly"}
             </button>
           )}
+          {genStatus && !isGenerating && <div className="alert-info" style={{ marginTop: 8, fontSize: 12 }}>{genStatus}</div>}
 
-          <hr className="section-divider" />
-
-          <div className="card" style={{ marginBottom: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Host a game</div>
-            <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>Generate a quiz first, then create a room for others to join</div>
-            {mpError && <div className="alert-error" style={{ marginBottom: 12 }}>{mpError}</div>}
+          <div style={{ marginTop: 28 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: "var(--txt2)" }}>Host a game</div>
+            {mpError && <div className="alert-error" style={{ marginBottom: 10 }}>{mpError}</div>}
             <button className="btn-secondary" style={{ width: "100%", opacity: questions.length > 0 ? 1 : 0.4 }}
               onClick={questions.length > 0 ? hostGame : () => setError("Generate a quiz first.")}
               disabled={questions.length === 0}>
@@ -865,20 +823,16 @@ export default function HomePage() {
             </button>
           </div>
 
-          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            <div style={{
-              padding: "14px 20px", fontSize: 14, fontWeight: 700,
-              borderBottom: showManual ? "1px solid var(--bdr,#3e3e3e)" : "none",
-              cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center"
-            }} onClick={() => setShowManual(m => !m)}>
+          <div className="collapsible" style={{ marginTop: 16 }}>
+            <div className="collapsible-header" onClick={() => setShowManual(m => !m)}>
               Manual Questions
               <span style={{ opacity: 0.4, fontSize: 12 }}>{showManual ? "▲" : "▼"}</span>
             </div>
             {showManual && (
-              <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className="collapsible-body">
                 <input className="field-input" placeholder="Question" value={manualQ} onChange={e => setManualQ(e.target.value)} />
                 <div style={{ display: "flex", gap: 8 }}>
-                  <input className="field-input" placeholder="Answer" value={manualA} onChange={e => setManualA(e.target.value)} />
+                  <input className="field-input" placeholder="Answer" value={manualA} onChange={e => setManualA(e.target.value)} style={{ marginBottom: 0 }} />
                   <button className="btn-secondary" style={{ whiteSpace: "nowrap" }} onClick={() => {
                     if (!manualQ.trim() || !manualA.trim()) return;
                     setManualList(l => [...l, { type: "fill", question: manualQ.trim(), answer: manualA.trim(), explanation: "" }]);
@@ -886,17 +840,17 @@ export default function HomePage() {
                   }}>Add</button>
                 </div>
                 {manualList.map((mq, i) => (
-                  <div key={i} className="card-sm" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0", borderTop: "1px solid var(--bdr)" }}>
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 600 }}>{mq.question}</div>
                       <div style={{ fontSize: 11, opacity: 0.5, marginTop: 3 }}>{mq.answer}</div>
                     </div>
-                    <button style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16, opacity: 0.7 }}
-                      onClick={() => setManualList(l => l.filter((_, j) => j !== i))}>x</button>
+                    <button style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 18, lineHeight: 1, opacity: 0.7 }}
+                      onClick={() => setManualList(l => l.filter((_, j) => j !== i))}>×</button>
                   </div>
                 ))}
                 {manualList.length > 0 && (
-                  <button className="btn-primary" onClick={() => startQuiz(manualList)}>
+                  <button className="btn-primary" style={{ width: "100%" }} onClick={() => startQuiz(manualList)}>
                     Start with {manualList.length} question{manualList.length !== 1 ? "s" : ""}
                   </button>
                 )}

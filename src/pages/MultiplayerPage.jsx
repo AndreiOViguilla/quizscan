@@ -91,7 +91,6 @@ export default function MultiplayerPage() {
   return (
     <div className="page">
       <h2 className="page-heading">{isHost ? "Game Lobby" : "Joined Room"}</h2>
-      <p className="page-sub">Real-time multiplayer · works across any device</p>
       <div className="mp-room-code">{mpCode}</div>
       <div className="mp-status-text">
         {mpStatus && mpStatus !== "room-closed"
