@@ -14,6 +14,14 @@ const TABS = [
   ["pdf", "PDF"], ["image", "IMAGE"], ["text", "TEXT"],
   ["url", "URL"], ["youtube", "YT"], ["topic", "TOPIC"],
 ];
+const TAB_ICONS = {
+  pdf: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>,
+  image: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>,
+  text: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="10" x2="3" y2="10"/><line x1="17" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/></svg>,
+  url: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
+  youtube: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46a2.78 2.78 0 0 0-1.95 1.96A29 29 0 0 0 1 12a29 29 0 0 0 .46 5.58A2.78 2.78 0 0 0 3.41 19.6C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 0 0 1.95-1.95A29 29 0 0 0 23 12a29 29 0 0 0-.46-5.58z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02"/></svg>,
+  topic: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>,
+};
 const MODES = [
   {
     id: "quiz",
@@ -473,7 +481,7 @@ export default function HomePage() {
       mpRealtimeRef.current = listener;
       setMpCode(code);
       setMpMode("host");
-      setMpPlayers([{ name, score: 0 }]);
+      setMpPlayers([{ name, score: 0, isHost: true }]);
       setMyMpName(name);
       navigate("multiplayer");
     } catch (e) {
@@ -487,13 +495,19 @@ export default function HomePage() {
     if (!code || code.length !== 4) return setMpError("Enter a valid 4-letter room code.");
     try {
       setMpError("");
-      const room = await joinRoom(code, name);
+      const storedKey = sessionStorage.getItem(`qs-mp-${code}`) || undefined;
+      const room = await joinRoom(code, name, storedKey);
       const assignedName = room.assignedName || name;
+      if (room.sessionKey) sessionStorage.setItem(`qs-mp-${code}`, room.sessionKey);
       const players = room.players ? Object.values(room.players) : [];
       if (room.questions?.length) setQuestions(room.questions);
       setMpSyncMode(room.syncMode || "self");
       const listener = new FirebaseListener(`/rooms/${code}/players`, (ps) => {
-        if (ps && typeof ps === "object") {
+        if (ps === null || ps === undefined) {
+          setMpStatus("room-closed");
+          return;
+        }
+        if (typeof ps === "object") {
           const arr = Object.values(ps).sort((a, b) => (b.score || 0) - (a.score || 0));
           setMpPlayers(arr);
         }
@@ -598,7 +612,9 @@ export default function HomePage() {
           <div className="tabs" style={{ marginBottom: 16 }}>
             {TABS.map(([t, label]) => (
               <button key={t} className={`tab-btn ${tab === t ? "active" : ""}`}
-                onClick={() => { setTab(t); setFile(null); }}>
+                onClick={() => { setTab(t); setFile(null); }}
+                style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                {TAB_ICONS[t]}
                 {label}
               </button>
             ))}

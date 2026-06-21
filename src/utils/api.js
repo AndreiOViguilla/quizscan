@@ -137,7 +137,7 @@ export async function createRoom(questions, hostName) {
     questions, host: safeHost, status: "waiting",
     createdAt: Date.now(), lastActivity: Date.now(),
     expiresAt: Date.now() + 60 * 60 * 1000,
-    players: { [safeHost]: { name: safeHost, score: 0, answer: null, ready: true } }
+    players: { [safeHost]: { name: safeHost, score: 0, answer: null, ready: true, isHost: true } }
   });
   setTimeout(() => deleteRoom(code).catch(() => {}), 60 * 60 * 1000);
   return code;
@@ -163,19 +163,47 @@ export async function cleanupExpiredRooms() {
   } catch {}
 }
 
-export async function joinRoom(code, playerName) {
+const MAX_PLAYERS = 50;
+
+export async function joinRoom(code, playerName, sessionKey) {
   const room = await fbGet(`/rooms/${code}`);
   if (!room) throw new Error("Room not found. Check the code and try again.");
   if (room.status === "finished") throw new Error("This game has already ended.");
-  const existing = room.players ? Object.keys(room.players) : [];
-  let uniqueName = sanitizeFbKey(playerName);
-  let counter = 2;
-  while (existing.includes(uniqueName)) {
-    uniqueName = `${sanitizeFbKey(playerName)}${counter}`;
-    counter++;
+  if (room.status === "playing") throw new Error("This game is already in progress.");
+
+  const players = room.players || {};
+  const existing = Object.keys(players);
+
+  // Reconnection: match by sessionKey
+  if (sessionKey) {
+    for (const [key, player] of Object.entries(players)) {
+      if (player.sessionKey === sessionKey) {
+        await fbUpdate(`/rooms/${code}/players/${key}`, { disconnected: false });
+        return { ...room, assignedName: key, sessionKey };
+      }
+    }
   }
-  await fbUpdate(`/rooms/${code}/players/${uniqueName}`, { name: uniqueName, score: 0, answer: null, ready: true });
-  return { ...room, assignedName: uniqueName };
+
+  if (existing.length >= MAX_PLAYERS) throw new Error(`Room is full (max ${MAX_PLAYERS} players).`);
+
+  const safeBase = sanitizeFbKey(playerName);
+  let uniqueName = safeBase;
+  let counter = 2;
+  while (existing.includes(uniqueName)) { uniqueName = `${safeBase}${counter}`; counter++; }
+
+  const newKey = crypto.getRandomValues(new Uint32Array(2)).reduce((s, n) => s + n.toString(36), "");
+  await fbUpdate(`/rooms/${code}/players/${uniqueName}`, {
+    name: uniqueName, score: 0, answer: null, ready: true, sessionKey: newKey,
+  });
+  return { ...room, assignedName: uniqueName, sessionKey: newKey };
+}
+
+export async function removePlayerFromRoom(code, playerName) {
+  await fbDelete(`/rooms/${code}/players/${playerName}`);
+}
+
+export async function setRoomStatus(code, status) {
+  await fbUpdate(`/rooms/${code}`, { status });
 }
 
 export async function deleteRoom(code) { await fbDelete(`/rooms/${code}`); }
@@ -243,12 +271,13 @@ export class FirebaseListener {
 
   _startPoll() {
     this.interval = setInterval(async () => {
+      if (this.es && this.es.readyState === 1) return; // SSE open — skip poll
       try {
         const data = await fbGet(this.path);
         this._state = data;
         this._emit(data);
       } catch {}
-    }, 1500);
+    }, 3000);
   }
 
   _emit(data) {
@@ -284,6 +313,6 @@ export async function updateMpScore(code, playerName, score, currentQ) {
   await fbUpdate(`/rooms/${code}/players/${playerName}`, {
     score,
     current_q: currentQ,
-    updated_at: new Date().toISOString(),
+    updated_at: Date.now(),
   });
 }

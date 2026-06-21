@@ -1,11 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
 import { useQuiz } from "../context/QuizContext";
 import { useMultiplayer } from "../context/MultiplayerContext";
-import { pingRoom, setRoomSyncMode } from "../utils/api";
+import { pingRoom, setRoomSyncMode, setRoomStatus, removePlayerFromRoom, deleteRoom } from "../utils/api";
+
+const MAX_PLAYERS = 50;
 
 export default function MultiplayerPage() {
-  const { navigate } = useApp();
+  const { navigate, showToast } = useApp();
   const { questions, resetQuizState, quizStartTime } = useQuiz();
   const {
     mpCode, mpMode, mpPlayers, myMpName, mpStatus, mpError,
@@ -13,32 +15,78 @@ export default function MultiplayerPage() {
     mpSyncMode, setMpSyncMode, myPlayerIdRef,
   } = useMultiplayer();
 
+  const confirmedInRoom = useRef(false);
+
   useEffect(() => {
     if (!mpCode) return;
     const interval = setInterval(() => pingRoom(mpCode), 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [mpCode]);
 
+  // Detect kick or room closed for guests
+  useEffect(() => {
+    if (mpMode !== "join" || !myMpName) return;
+
+    if (mpStatus === "room-closed") {
+      showToast("The room was closed by the host.", "error");
+      cleanUp(false);
+      navigate("home");
+      return;
+    }
+
+    if (mpPlayers.length === 0) return;
+    const iAmIn = mpPlayers.some(p => p.name === myMpName);
+    if (iAmIn) {
+      confirmedInRoom.current = true;
+    } else if (confirmedInRoom.current) {
+      showToast("You were removed from the room by the host.", "error");
+      cleanUp(false);
+      navigate("home");
+    }
+  }, [mpPlayers, myMpName, mpMode, mpStatus]);
+
+  const cleanUp = (removeFromFb = true) => {
+    if (removeFromFb && mpMode !== "host" && myMpName && mpCode) {
+      removePlayerFromRoom(mpCode, myMpName).catch(() => {});
+    }
+    if (mpCode) sessionStorage.removeItem(`qs-mp-${mpCode}`);
+    if (mpRealtimeRef.current) { mpRealtimeRef.current.disconnect(); mpRealtimeRef.current = null; }
+    setMpMode(""); setMpPlayers([]); setMpCode(""); setMpStatus(""); setMpError("");
+    setMpSyncMode("self");
+    myPlayerIdRef.current = null;
+    confirmedInRoom.current = false;
+  };
+
   const setSyncMode = async (mode) => {
     setMpSyncMode(mode);
     if (mpCode) setRoomSyncMode(mpCode, mode).catch(() => {});
   };
 
-  const startGame = () => {
+  const startGame = async () => {
+    if (mpMode === "host" && mpCode) {
+      await setRoomStatus(mpCode, "playing").catch(() => {});
+    }
     resetQuizState();
     quizStartTime.current = Date.now();
     navigate("quiz");
   };
 
   const leaveRoom = () => {
-    if (mpRealtimeRef.current) { mpRealtimeRef.current.disconnect(); mpRealtimeRef.current = null; }
-    setMpMode(""); setMpPlayers([]); setMpCode(""); setMpStatus(""); setMpError("");
-    setMpSyncMode("self");
-    myPlayerIdRef.current = null;
+    if (mpMode === "host" && mpCode) {
+      deleteRoom(mpCode).catch(() => {});
+      cleanUp(false);
+    } else {
+      cleanUp(true);
+    }
     navigate("home");
   };
 
+  const kickPlayer = (playerName) => {
+    removePlayerFromRoom(mpCode, playerName).catch(() => {});
+  };
+
   const isHost = mpMode === "host";
+  const playerCount = mpPlayers.length;
 
   return (
     <div className="page">
@@ -46,9 +94,11 @@ export default function MultiplayerPage() {
       <p className="page-sub">// powered by Firebase — works across any device globally</p>
       <div className="mp-room-code">{mpCode}</div>
       <div className="mp-status-text">
-        {mpStatus || (isHost
-          ? `${mpPlayers.length} player(s) connected — share the code above!`
-          : "Connected! Waiting for host to start...")}
+        {mpStatus && mpStatus !== "room-closed"
+          ? mpStatus
+          : isHost
+            ? `${playerCount}/${MAX_PLAYERS} player(s) connected — share the code above!`
+            : "Connected! Waiting for host to start..."}
       </div>
       {mpError && <div className="alert-error">! {mpError}</div>}
 
@@ -100,9 +150,23 @@ export default function MultiplayerPage() {
         {mpPlayers.map((p, i) => (
           <div key={i} className="mp-player-row">
             <span className="mp-player-name">
-              {p.name} {i === 0 ? "[H]" : ""} {p.name === myMpName ? "(you)" : ""}
+              {p.name}
+              {p.isHost && <span style={{ opacity: 0.4, fontSize: 11, marginLeft: 6 }}>[HOST]</span>}
+              {p.name === myMpName && <span style={{ opacity: 0.4, fontSize: 11, marginLeft: 6 }}>(you)</span>}
             </span>
-            <span className="mp-player-score">{p.score || 0} pts</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span className="mp-player-score">{p.score || 0} pts</span>
+              {isHost && !p.isHost && (
+                <button
+                  onClick={() => kickPlayer(p.name)}
+                  title="Remove player"
+                  style={{
+                    background: "none", border: "none", cursor: "pointer",
+                    opacity: 0.4, fontSize: 13, color: "#ef4444", padding: "2px 6px",
+                    lineHeight: 1,
+                  }}>✕</button>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -110,8 +174,8 @@ export default function MultiplayerPage() {
       {questions.length > 0 && (
         <button className="btn-primary" onClick={startGame} style={{ marginBottom: 12 }}>
           {isHost
-            ? `Start Game (${mpPlayers.length} player${mpPlayers.length !== 1 ? "s" : ""})`
-            : "Start Playing"} →
+            ? `Start Game (${playerCount} player${playerCount !== 1 ? "s" : ""}) →`
+            : "Start Playing →"}
         </button>
       )}
 
@@ -119,7 +183,9 @@ export default function MultiplayerPage() {
         Share the code <strong>{mpCode}</strong> with friends — they go to this site, click Join, enter the code and play live!
       </div>
       <div style={{ marginTop: 20 }}>
-        <button className="btn-secondary" onClick={leaveRoom}>← Leave Room</button>
+        <button className="btn-secondary" onClick={leaveRoom}>
+          {isHost ? "Close Room" : "← Leave Room"}
+        </button>
       </div>
     </div>
   );

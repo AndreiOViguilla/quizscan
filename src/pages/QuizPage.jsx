@@ -231,7 +231,7 @@ export default function QuizPage() {
     clearInterval(timerRef.current);
     let correct = false;
     if (q.type === "mcq") correct = ua === q.answer;
-    else if (q.type === "tf") correct = ua === q.answer;
+    else if (q.type === "tf") correct = ua.toLowerCase() === String(q.answer).toLowerCase();
     else correct = String(ua).toLowerCase() === String(q.answer).toLowerCase();
     if (useSounds) playSound(correct ? "correct" : "wrong");
     const ns = correct ? streak + 1 : 0;
