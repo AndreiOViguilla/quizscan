@@ -16,7 +16,7 @@ function Toggle({ on, onToggle, label }) {
 }
 
 export default function EditPage() {
-  const { navigate } = useApp();
+  const { navigate, setReturnToSettings } = useApp();
   const { useShuffleQ, setUseShuffleQ, useShuffleChoices, setUseShuffleChoices, gameMode, setGameMode, playerName } = useSettings();
   const { questions, setQuestions, resetQuizState, quizStartTime } = useQuiz();
   const { setMyMpName, setMpStatus, setMpCode, setMpPlayers, setMpMode, myPlayerIdRef, mpRealtimeRef, setMpError } = useMultiplayer();
@@ -93,7 +93,7 @@ export default function EditPage() {
 
   return (
     <div className="page">
-      <BackButton to="home" label="Back to Home" />
+      <button className="back-btn" onClick={() => { setReturnToSettings(true); navigate("home"); }}>← Back to Settings</button>
       <h2 className="page-heading">Review & Edit Questions</h2>
       <p className="page-sub">// fix any AI mistakes before starting — click any field to edit</p>
 

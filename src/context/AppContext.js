@@ -20,6 +20,7 @@ export function AppProvider({ children }) {
   const [error, setError] = useState("");
   const [toasts, setToasts] = useState([]);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [returnToSettings, setReturnToSettings] = useState(false);
   const [lb, setLb] = useState(loadLB());
   const [history, setHistory] = useState(loadHistory());
 
@@ -42,6 +43,7 @@ export function AppProvider({ children }) {
       error, setError,
       toasts, showToast,
       showAuthModal, setShowAuthModal,
+      returnToSettings, setReturnToSettings,
       lb, setLb,
       history, setHistory,
     }}>

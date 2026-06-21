@@ -43,21 +43,38 @@ module.exports = async function handler(req, res) {
 
 
 
-  const GROQ_KEY = process.env.GROQ_KEY || process.env.REACT_APP_GROQ_KEY;
-  if (!GROQ_KEY) return res.status(500).json({ error: "GROQ_KEY not configured" });
+  const keys = [
+    process.env.REACT_APP_GROQ_KEY,
+    process.env.REACT_APP_GROQ_KEY_2,
+    process.env.REACT_APP_GROQ_KEY_3,
+    process.env.REACT_APP_GROQ_KEY_4,
+  ].filter(Boolean);
 
-  try {
-    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_KEY}` },
-      body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
-    });
-    const data = await groqRes.json();
-    if (data.error) return res.status(502).json({ error: data.error.message });
-    const content = data.choices?.[0]?.message?.content || "";
-    if (!content) return res.status(502).json({ error: "Empty response from Groq" });
-    return res.status(200).json({ content });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
+  if (!keys.length) return res.status(500).json({ error: "No Groq API key configured" });
+
+  let lastError = "";
+  for (const key of keys) {
+    try {
+      const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
+      });
+      const data = await groqRes.json();
+      if (data.error) {
+        const msg = data.error.message || "";
+        const isRateLimit = groqRes.status === 429 || msg.toLowerCase().includes("rate_limit");
+        lastError = msg;
+        if (isRateLimit) continue; // try next key
+        return res.status(502).json({ error: msg });
+      }
+      const content = data.choices?.[0]?.message?.content || "";
+      if (!content) { lastError = "Empty response"; continue; }
+      return res.status(200).json({ content });
+    } catch (err) {
+      lastError = err.message;
+    }
   }
+
+  return res.status(429).json({ error: lastError || "All Groq keys are rate limited. Try again in a minute." });
 };

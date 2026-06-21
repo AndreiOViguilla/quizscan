@@ -64,7 +64,7 @@ const MODES = [
 ];
 
 export default function HomePage() {
-  const { navigate, error, setError, setShowAuthModal } = useApp();
+  const { navigate, error, setError, setShowAuthModal, returnToSettings, setReturnToSettings } = useApp();
   const {
     mode, setMode, tab, setTab, file, setFile, text, setText,
     urlVal, setUrlVal, ytVal, setYtVal, topicVal, setTopicVal,
@@ -116,6 +116,13 @@ export default function HomePage() {
     const saved = loadDraft();
     if (saved?.length) setDraft(saved);
   }, []);
+
+  useEffect(() => {
+    if (returnToSettings) {
+      setShowSettings(true);
+      setReturnToSettings(false);
+    }
+  }, [returnToSettings]);
 
   useEffect(() => {
     if (!showVerifyModal) return;
