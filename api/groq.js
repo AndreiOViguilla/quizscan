@@ -27,6 +27,23 @@ async function verifyTurnstile(token) {
   } catch { return true; }
 }
 
+async function moderateText(text) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return { flagged: false };
+  try {
+    const r = await fetch("https://api.openai.com/v1/moderations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: "omni-moderation-latest", input: text }),
+    });
+    if (!r.ok) return { flagged: false };
+    const d = await r.json();
+    return d.results?.[0] ?? { flagged: false };
+  } catch {
+    return { flagged: false };
+  }
+}
+
 module.exports = async function handler(req, res) {
   const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "";
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN || "*");
@@ -52,6 +69,11 @@ module.exports = async function handler(req, res) {
 
   if (!keys.length) return res.status(500).json({ error: "No Groq API key configured" });
 
+  // OpenAI moderation on input
+  const inputText = messages.map(m => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
+  const inputMod = await moderateText(inputText);
+  if (inputMod.flagged) return res.status(400).json({ error: "Content not allowed." });
+
   let lastError = "";
   for (const key of keys) {
     try {
@@ -70,6 +92,8 @@ module.exports = async function handler(req, res) {
       }
       const content = data.choices?.[0]?.message?.content || "";
       if (!content) { lastError = "Empty response"; continue; }
+      const outMod = await moderateText(content);
+      if (outMod.flagged) return res.status(400).json({ error: "Generated content was flagged. Try a different topic." });
       return res.status(200).json({ content });
     } catch (err) {
       lastError = err.message;

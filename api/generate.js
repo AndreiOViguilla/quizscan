@@ -84,6 +84,23 @@ function containsInappropriate(messages) {
   });
 }
 
+async function moderateText(text) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return { flagged: false };
+  try {
+    const r = await fetch("https://api.openai.com/v1/moderations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: "omni-moderation-latest", input: text }),
+    });
+    if (!r.ok) return { flagged: false };
+    const d = await r.json();
+    return d.results?.[0] ?? { flagged: false };
+  } catch {
+    return { flagged: false };
+  }
+}
+
 const MAX_MESSAGES = 12;
 const MAX_CONTENT_LENGTH = 12000; // chars across all messages
 
@@ -123,6 +140,13 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: "Content not allowed." });
   }
 
+  // OpenAI moderation on input
+  const inputText = messages.map(m => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n");
+  const inputMod = await moderateText(inputText);
+  if (inputMod.flagged) {
+    return res.status(400).json({ error: "Content not allowed." });
+  }
+
   const HF_TOKEN = process.env.HF_TOKEN;
   const HF_SPACE_URL = process.env.HF_SPACE_URL; // e.g. https://yourusername-quizscan-model.hf.space
 
@@ -140,7 +164,11 @@ module.exports = async function handler(req, res) {
       if (hfRes.ok) {
         const data = await hfRes.json();
         const content = data.choices?.[0]?.message?.content || "";
-        if (content) return res.status(200).json({ content, provider: "hf-serverless" });
+        if (content) {
+          const outMod = await moderateText(content);
+          if (outMod.flagged) return res.status(400).json({ error: "Generated content was flagged. Try a different topic." });
+          return res.status(200).json({ content, provider: "hf-serverless" });
+        }
       }
       // 429 = rate limited, 503 = model overloaded — fall through to Space
     } catch {}
@@ -157,7 +185,11 @@ module.exports = async function handler(req, res) {
       if (spaceRes.ok) {
         const data = await spaceRes.json();
         const content = data.data?.[0] || "";
-        if (content) return res.status(200).json({ content, provider: "hf-space" });
+        if (content) {
+          const outMod = await moderateText(content);
+          if (outMod.flagged) return res.status(400).json({ error: "Generated content was flagged. Try a different topic." });
+          return res.status(200).json({ content, provider: "hf-space" });
+        }
       }
     } catch {}
   }
