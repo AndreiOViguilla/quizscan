@@ -55,24 +55,36 @@ module.exports = async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { text } = req.body;
-  if (!text || typeof text !== "string") return res.status(400).json({ error: "Missing text" });
-  if (text.length > 1000) return res.status(400).json({ error: "Text too long" });
+  const { text, imageBase64 } = req.body;
+  if (!text && !imageBase64) return res.status(400).json({ error: "Missing content" });
+  if (text && typeof text !== "string") return res.status(400).json({ error: "Invalid text" });
+  if (text && text.length > 1000) return res.status(400).json({ error: "Text too long" });
 
-  // Regex layer — catches common slurs/explicit words immediately
-  if (BLOCKED.some(pat => pat.test(text))) {
+  // Regex layer on text
+  if (text && BLOCKED.some(pat => pat.test(text))) {
     return res.status(200).json({ flagged: true });
   }
 
-  // OpenAI layer — catches context-aware harmful content
   const key = process.env.OPENAI_API_KEY;
   if (!key) return res.status(200).json({ flagged: false });
 
   try {
+    let input;
+    if (imageBase64 && text) {
+      input = [
+        { type: "text", text: text.trim() },
+        { type: "image_url", image_url: { url: imageBase64 } },
+      ];
+    } else if (imageBase64) {
+      input = [{ type: "image_url", image_url: { url: imageBase64 } }];
+    } else {
+      input = text.trim();
+    }
+
     const r = await fetch("https://api.openai.com/v1/moderations", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: "omni-moderation-latest", input: text.trim() }),
+      body: JSON.stringify({ model: "omni-moderation-latest", input }),
     });
     if (!r.ok) return res.status(200).json({ flagged: false });
     const d = await r.json();

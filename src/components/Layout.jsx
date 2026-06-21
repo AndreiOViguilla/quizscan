@@ -154,17 +154,126 @@ export function Header() {
   );
 }
 
+function ReportModal({ onClose }) {
+  const [text, setText] = useState("");
+  const [image, setImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [status, setStatus] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const fileRef = useRef();
+
+  const handleImage = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setStatus("Image must be under 5MB."); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => { setImage(ev.target.result); setImagePreview(ev.target.result); };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmit = async () => {
+    if (!text.trim() && !image) { setStatus("Please add a description or image."); return; }
+    setSubmitting(true);
+    setStatus("");
+    try {
+      // Moderate text
+      if (text.trim()) {
+        const modRes = await fetch("/api/moderate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        const modData = await modRes.json();
+        if (modData.flagged) { setStatus("Your report contains inappropriate content."); setSubmitting(false); return; }
+      }
+      // Moderate image
+      if (image) {
+        const modRes = await fetch("/api/moderate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "image", imageBase64: image }),
+        });
+        const modData = await modRes.json();
+        if (modData.flagged) { setStatus("The uploaded image was flagged as inappropriate."); setSubmitting(false); return; }
+      }
+      // Submit to Firebase
+      await fetch("https://quizscan-94acb-default-rtdb.asia-southeast1.firebasedatabase.app/feedback.json", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim(), hasImage: !!image, image: image || null, createdAt: Date.now() }),
+      });
+      setStatus("done");
+    } catch {
+      setStatus("Something went wrong. Please try again.");
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000, padding: 24 }}
+      onClick={onClose}>
+      <div style={{ background: "var(--bg2)", border: "1px solid var(--bdr)", borderRadius: 16, padding: 28, maxWidth: 480, width: "100%" }}
+        onClick={e => e.stopPropagation()}>
+        {status === "done" ? (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>✓</div>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>Report submitted</div>
+            <div style={{ fontSize: 13, opacity: 0.5, marginBottom: 20 }}>Thanks for helping improve QuizScan.</div>
+            <button className="btn-primary" onClick={onClose}>Close</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div style={{ fontWeight: 700, fontSize: 17 }}>Report a problem</div>
+              <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", opacity: 0.4, color: "inherit" }}>✕</button>
+            </div>
+            <textarea
+              className="field-input"
+              placeholder="Describe the issue..."
+              value={text}
+              onChange={e => setText(e.target.value)}
+              rows={4}
+              style={{ width: "100%", resize: "vertical", marginBottom: 12, fontFamily: "inherit" }}
+            />
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleImage} />
+            {imagePreview ? (
+              <div style={{ position: "relative", marginBottom: 12 }}>
+                <img src={imagePreview} alt="preview" style={{ width: "100%", borderRadius: 10, maxHeight: 200, objectFit: "cover" }} />
+                <button onClick={() => { setImage(null); setImagePreview(null); fileRef.current.value = ""; }}
+                  style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", color: "#fff", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+              </div>
+            ) : (
+              <button className="btn-secondary" style={{ width: "100%", marginBottom: 12 }} onClick={() => fileRef.current.click()}>
+                + Attach screenshot
+              </button>
+            )}
+            {status && status !== "done" && <div className="alert-error" style={{ marginBottom: 12 }}>{status}</div>}
+            <button className="btn-primary" style={{ width: "100%" }} onClick={handleSubmit} disabled={submitting}>
+              {submitting ? "Submitting..." : "Submit Report"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function Footer() {
   const { navigate } = useApp();
+  const [showReport, setShowReport] = useState(false);
   return (
-    <footer className="footer">
-      <div className="footer-left"><span>QuizScan</span> — AI quiz generator</div>
-      <nav className="footer-right" aria-label="Footer navigation">
-        <button className="footer-link" onClick={() => navigate("home")}>Home</button>
-        <button className="footer-link" onClick={() => navigate("leaderboard")}>Leaderboard</button>
-        <button className="footer-link" onClick={() => navigate("history")}>History</button>
-      </nav>
-    </footer>
+    <>
+      <footer className="footer">
+        <div className="footer-left"><span>QuizScan</span> — AI quiz generator</div>
+        <nav className="footer-right" aria-label="Footer navigation">
+          <button className="footer-link" onClick={() => navigate("home")}>Home</button>
+          <button className="footer-link" onClick={() => navigate("leaderboard")}>Leaderboard</button>
+          <button className="footer-link" onClick={() => navigate("history")}>History</button>
+          <button className="footer-link" onClick={() => setShowReport(true)}>Report</button>
+        </nav>
+      </footer>
+      {showReport && <ReportModal onClose={() => setShowReport(false)} />}
+    </>
   );
 }
 
