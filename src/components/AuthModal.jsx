@@ -29,7 +29,7 @@ function getAuthError(code = "") {
     case "auth/user-disabled":
       return "Invalid email or password.";
     case "auth/email-already-in-use":
-      return "An account with this email already exists.";
+      return "This email is already registered. Try signing in instead.";
     case "auth/weak-password":
       return "Password must be at least 6 characters.";
     case "auth/too-many-requests":
