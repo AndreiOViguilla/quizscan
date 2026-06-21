@@ -1,8 +1,7 @@
-import { GROQ_KEY } from "./constants";
 import { fbGet, fbSet, fbUpdate, fbDelete } from "./db";
 
 // ─── REQUEST SIGNING (HMAC-SHA256) ────────────────────────────────────────────
-const GENERATE_SECRET = process.env.REACT_APP_GENERATE_SECRET || "";
+const GENERATE_SECRET = "";
 
 async function signRequest(bodyStr) {
   if (!GENERATE_SECRET) return {};
@@ -19,14 +18,14 @@ async function signRequest(bodyStr) {
 
 // ─── GROQ ─────────────────────────────────────────────────────────────────────
 export async function groq(messages, model = "llama-3.3-70b-versatile", maxTokens = 8000) {
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+  const res = await fetch("/api/groq", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_KEY}` },
-    body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, model, maxTokens }),
   });
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message);
-  return data.choices?.[0]?.message?.content || "";
+  if (!res.ok || data.error) throw new Error(data.error || "Groq request failed");
+  return data.content || "";
 }
 
 // ─── HUGGING FACE → GROQ FALLBACK ────────────────────────────────────────────

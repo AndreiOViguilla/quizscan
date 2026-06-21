@@ -1,4 +1,3 @@
-export const GROQ_KEY = process.env.REACT_APP_GROQ_KEY || "";
 export const YOUTUBE_API_KEY = process.env.REACT_APP_YOUTUBE_API_KEY || "";
 export const TIMER_SEC = 30;
 export const LETTERS = ["A", "B", "C", "D"];
