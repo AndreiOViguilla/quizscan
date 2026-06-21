@@ -1,37 +1,159 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { signInWithGoogle, signInWithEmail, signUpWithEmail, resetPassword } from "../utils/firebase";
+
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MS = 30 * 60 * 1000;
+const CREDENTIAL_ERRORS = new Set(["auth/user-not-found", "auth/wrong-password", "auth/invalid-credential", "auth/invalid-email"]);
+
+function lockKey(email) { return `qs-lock-${email.trim().toLowerCase()}`; }
+function getLock(email) { try { return JSON.parse(localStorage.getItem(lockKey(email)) || "{}"); } catch { return {}; } }
+function setLock(email, data) { localStorage.setItem(lockKey(email), JSON.stringify(data)); }
+function clearLock(email) { localStorage.removeItem(lockKey(email)); }
+
+function checkLock(email) {
+  const { lockedUntil, attempts } = getLock(email);
+  if (lockedUntil && Date.now() < lockedUntil) {
+    const mins = Math.ceil((lockedUntil - Date.now()) / 60000);
+    return { locked: true, mins, attempts };
+  }
+  if (lockedUntil) clearLock(email);
+  return { locked: false, attempts: attempts || 0 };
+}
+
+function getAuthError(code = "") {
+  switch (code) {
+    case "auth/user-not-found":
+    case "auth/wrong-password":
+    case "auth/invalid-credential":
+    case "auth/invalid-email":
+    case "auth/user-disabled":
+      return "Invalid email or password.";
+    case "auth/email-already-in-use":
+      return "An account with this email already exists.";
+    case "auth/weak-password":
+      return "Password must be at least 6 characters.";
+    case "auth/too-many-requests":
+      return "Too many attempts. Please try again later.";
+    case "auth/network-request-failed":
+      return "Network error. Check your connection.";
+    default:
+      return "Sign in failed. Please try again.";
+  }
+}
 
 export default function AuthModal({ onClose }) {
   const [tab, setTab] = useState("signin"); // signin | signup | reset
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [cfToken, setCfToken] = useState(null);
+  const tsRef = useRef(null);
+  const tsWidgetId = useRef(null);
+
+  const SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY;
+
+  useEffect(() => {
+    if (!SITE_KEY || tab === "reset") return;
+    let pollTimer = null;
+    const tryRender = () => {
+      const container = tsRef.current;
+      if (window.turnstile && container && !container._tsRendered) {
+        container._tsRendered = true;
+        tsWidgetId.current = window.turnstile.render(container, {
+          sitekey: SITE_KEY,
+          callback: (token) => setCfToken(token),
+          "expired-callback": () => setCfToken(null),
+          "error-callback": () => setCfToken(null),
+          theme: "auto",
+          size: "normal",
+        });
+      } else {
+        pollTimer = setTimeout(tryRender, 200);
+      }
+    };
+    if (!document.getElementById("ts-script")) {
+      const s = document.createElement("script");
+      s.id = "ts-script";
+      s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      s.async = true;
+      document.head.appendChild(s);
+    }
+    tryRender();
+    return () => {
+      clearTimeout(pollTimer);
+      if (tsWidgetId.current !== null && window.turnstile) {
+        try { window.turnstile.remove(tsWidgetId.current); } catch {}
+      }
+      if (tsRef.current) delete tsRef.current._tsRendered;
+      tsWidgetId.current = null;
+      setCfToken(null);
+    };
+  }, [tab, SITE_KEY]);
+
+  const resetTurnstile = () => {
+    if (tsWidgetId.current !== null && window.turnstile) {
+      try { window.turnstile.reset(tsWidgetId.current); } catch {}
+    }
+    setCfToken(null);
+  };
 
   const handleGoogle = async () => {
-    setError(""); setLoading(true);
+    setError("");
+    if (SITE_KEY && !cfToken) { setError("Please complete the verification first."); return; }
+    setLoading(true);
     try {
       await signInWithGoogle();
       onClose();
     } catch (e) {
-      setError(e.message.replace("Firebase: ", ""));
+      const code = e.code || "";
+      setError(code === "auth/popup-closed-by-user" ? "" : getAuthError(code));
+      resetTurnstile();
     }
     setLoading(false);
   };
 
   const handleEmail = async () => {
-    setError(""); setLoading(true);
+    setError("");
+    if (tab === "signup" && password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    if (tab === "signin" && email) {
+      const lock = checkLock(email);
+      if (lock.locked) {
+        setError(`Too many failed attempts. Try again in ${lock.mins} minute${lock.mins !== 1 ? "s" : ""}.`);
+        return;
+      }
+    }
+    if (SITE_KEY && !cfToken) { setError("Please complete the verification first."); return; }
+    setLoading(true);
     try {
       if (tab === "signup") {
         await signUpWithEmail(email, password, name);
       } else {
         await signInWithEmail(email, password);
       }
+      if (email) clearLock(email);
       onClose();
     } catch (e) {
-      setError(e.message.replace("Firebase: ", "").replace(/\(.*\)/, "").trim());
+      resetTurnstile();
+      if (tab === "signin" && email && CREDENTIAL_ERRORS.has(e.code)) {
+        const lock = getLock(email);
+        const attempts = (lock.attempts || 0) + 1;
+        if (attempts >= MAX_ATTEMPTS) {
+          setLock(email, { attempts, lockedUntil: Date.now() + LOCKOUT_MS });
+          setError("Too many failed attempts. Account locked for 30 minutes.");
+        } else {
+          setLock(email, { attempts });
+          setError(`Invalid email or password. ${MAX_ATTEMPTS - attempts} attempt${MAX_ATTEMPTS - attempts !== 1 ? "s" : ""} remaining.`);
+        }
+      } else {
+        setError(getAuthError(e.code));
+      }
     }
     setLoading(false);
   };
@@ -40,12 +162,14 @@ export default function AuthModal({ onClose }) {
     setError(""); setLoading(true);
     try {
       await resetPassword(email);
-      setResetSent(true);
-    } catch (e) {
-      setError(e.message.replace("Firebase: ", "").replace(/\(.*\)/, "").trim());
+    } catch {
+      // Silently ignore — don't reveal whether email exists
     }
+    setResetSent(true);
     setLoading(false);
   };
+
+  const switchTab = (t) => { setTab(t); setError(""); setResetSent(false); };
 
   return (
     <div style={{
@@ -72,7 +196,7 @@ export default function AuthModal({ onClose }) {
         {tab === "reset" ? (
           resetSent ? (
             <div className="alert-info" style={{ marginBottom: 16 }}>
-              Reset link sent! Check your email.
+              If an account exists with this email, a reset link has been sent.
             </div>
           ) : (
             <>
@@ -80,14 +204,13 @@ export default function AuthModal({ onClose }) {
               <input className="field-input" type="email" placeholder="you@email.com"
                 value={email} onChange={e => setEmail(e.target.value)} style={{ marginBottom: 16 }} />
               <button className="btn-primary" style={{ width: "100%", padding: "12px", marginBottom: 12 }}
-                onClick={handleReset} disabled={loading}>
+                onClick={handleReset} disabled={loading || !email}>
                 {loading ? "Sending..." : "Send Reset Link"}
               </button>
             </>
           )
         ) : (
           <>
-            {/* Google */}
             <button onClick={handleGoogle} disabled={loading} style={{
               width: "100%", padding: "11px", borderRadius: 8, border: "1px solid var(--bdr,#3e3e3e)",
               background: "transparent", color: "inherit", cursor: "pointer",
@@ -125,8 +248,24 @@ export default function AuthModal({ onClose }) {
             <label className="field-label">Password</label>
             <input className="field-input" type="password" placeholder="••••••••"
               value={password} onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleEmail()}
-              style={{ marginBottom: 20 }} />
+              onKeyDown={e => e.key === "Enter" && tab === "signin" && handleEmail()}
+              style={{ marginBottom: tab === "signup" ? 12 : 20 }} />
+
+            {tab === "signup" && (
+              <>
+                <label className="field-label">Confirm Password</label>
+                <input className="field-input" type="password" placeholder="••••••••"
+                  value={confirm} onChange={e => setConfirm(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleEmail()}
+                  style={{ marginBottom: 20 }} />
+              </>
+            )}
+
+            {SITE_KEY && (
+              <div style={{ marginBottom: 16 }}>
+                <div ref={tsRef} />
+              </div>
+            )}
 
             <button className="btn-primary" style={{ width: "100%", padding: "12px", marginBottom: 12 }}
               onClick={handleEmail} disabled={loading}>
@@ -135,29 +274,28 @@ export default function AuthModal({ onClose }) {
           </>
         )}
 
-        {/* Footer links */}
         <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
           {tab === "signin" && (
             <>
               <button style={{ background: "none", border: "none", color: "inherit", opacity: 0.5, fontSize: 12, cursor: "pointer", padding: 0 }}
-                onClick={() => { setTab("signup"); setError(""); }}>
+                onClick={() => switchTab("signup")}>
                 Create account
               </button>
               <button style={{ background: "none", border: "none", color: "inherit", opacity: 0.5, fontSize: 12, cursor: "pointer", padding: 0 }}
-                onClick={() => { setTab("reset"); setError(""); }}>
+                onClick={() => switchTab("reset")}>
                 Forgot password?
               </button>
             </>
           )}
           {tab === "signup" && (
             <button style={{ background: "none", border: "none", color: "inherit", opacity: 0.5, fontSize: 12, cursor: "pointer", padding: 0 }}
-              onClick={() => { setTab("signin"); setError(""); }}>
+              onClick={() => switchTab("signin")}>
               Already have an account? Sign in
             </button>
           )}
           {tab === "reset" && (
             <button style={{ background: "none", border: "none", color: "inherit", opacity: 0.5, fontSize: 12, cursor: "pointer", padding: 0 }}
-              onClick={() => { setTab("signin"); setError(""); setResetSent(false); }}>
+              onClick={() => switchTab("signin")}>
               Back to sign in
             </button>
           )}

@@ -1,8 +1,8 @@
 import { useEffect, lazy, Suspense } from "react";
 import { AppProvider, useApp } from "./context/AppContext";
 import { SettingsProvider } from "./context/SettingsContext";
-import { QuizProvider } from "./context/QuizContext";
-import { MultiplayerProvider } from "./context/MultiplayerContext";
+import { QuizProvider, useQuiz } from "./context/QuizContext";
+import { MultiplayerProvider, useMultiplayer } from "./context/MultiplayerContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { cleanupExpiredRooms } from "./utils/api";
 import { makeGlobalStyles } from "./styles/theme";
@@ -23,18 +23,34 @@ const FindPage      = lazy(() => import("./pages/FindPage"));
 const ProfilePage   = lazy(() => import("./pages/ProfilePage"));
 const DailyPage     = lazy(() => import("./pages/DailyPage"));
 
+function ProtectedPage({ children }) {
+  const { navigate, showToast } = useApp();
+  const { questions } = useQuiz();
+  const { mpMode } = useMultiplayer();
+
+  useEffect(() => {
+    if (questions.length === 0 && !mpMode) {
+      showToast("Generate a quiz first.", "error");
+      navigate("home");
+    }
+  }, []);
+
+  if (questions.length === 0 && !mpMode) return null;
+  return children;
+}
+
 function Router() {
   const { page } = useApp();
   switch (page) {
     case "home":        return <HomePage />;
     case "loading":     return <LoadingPage />;
-    case "edit":        return <EditPage />;
-    case "quiz":        return <QuizPage />;
-    case "results":     return <ResultsPage />;
-    case "study":       return <StudyPage />;
-    case "flashcard":   return <FlashcardPage />;
+    case "edit":        return <ProtectedPage><EditPage /></ProtectedPage>;
+    case "quiz":        return <ProtectedPage><QuizPage /></ProtectedPage>;
+    case "results":     return <ProtectedPage><ResultsPage /></ProtectedPage>;
+    case "study":       return <ProtectedPage><StudyPage /></ProtectedPage>;
+    case "flashcard":   return <ProtectedPage><FlashcardPage /></ProtectedPage>;
+    case "leaderboard": return <ProtectedPage><LeaderboardPage /></ProtectedPage>;
     case "multiplayer": return <MultiplayerPage />;
-    case "leaderboard": return <LeaderboardPage />;
     case "history":     return <HistoryPage />;
     case "find":        return <FindPage />;
     case "profile":     return <ProfilePage />;

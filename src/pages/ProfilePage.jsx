@@ -57,6 +57,11 @@ export default function ProfilePage() {
         <div>
           <div style={{ fontWeight: 700, fontSize: 20 }}>{user.displayName || user.email?.split("@")[0]}</div>
           <div style={{ fontSize: 12, opacity: 0.5, marginTop: 2 }}>{user.email}</div>
+          {user.metadata?.lastSignInTime && (
+            <div style={{ fontSize: 11, opacity: 0.35, marginTop: 4 }}>
+              Last login: {new Date(user.metadata.lastSignInTime).toLocaleString()}
+            </div>
+          )}
         </div>
       </div>
 
