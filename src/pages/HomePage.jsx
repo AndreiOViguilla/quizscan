@@ -211,6 +211,48 @@ export default function HomePage() {
     /\[INST\]/i,
     /DAN\b/,
   ];
+
+  const INAPPROPRIATE_PATTERNS = [
+    /\bf[\W_]*u[\W_]*c[\W_]*k/i,
+    /\bs[\W_]*h[\W_]*i[\W_]*t/i,
+    /\ba[\W_]*s[\W_]*s[\W_]*h[\W_]*o[\W_]*l[\W_]*e/i,
+    /\bb[\W_]*i[\W_]*t[\W_]*c[\W_]*h/i,
+    /\bc[\W_]*u[\W_]*n[\W_]*t\b/i,
+    /\bn[\W_]*i[\W_]*g[\W_]*g[\W_]*[ae]/i,
+    /\bf[\W_]*a[\W_]*g[\W_]*g/i,
+    /\bporn(ograph\w*)?/i,
+    /\bxxx\b/i,
+    /\bhentai\b/i,
+    /\bsex\s+tape\b/i,
+    /\bnude[s]?\b/i,
+    /\bchild\s+(porn|sex|nude|naked)\b/i,
+    /\bhow\s+to\s+(make|build|synthesize|create)\s+(bomb|drug|meth|cocaine|explosiv)/i,
+    /\bhow\s+to\s+(kill|murder|poison|assault)\s+(a\s+)?(person|someone|people|human)/i,
+    /\bsuicide\s+(method|instruction|how\s+to|step)/i,
+    /\bself[\W_]?harm\s+(method|how|step|instruction)/i,
+    // Tagalog profanity
+    /\bputa[ng\s]+ina\b/i,
+    /putangina/i,
+    /\bputcha\b/i,
+    /\bpucha\b/i,
+    /\bkingina\b/i,
+    /\bkupal\b/i,
+    /\btarantado\b/i,
+    /\bhinayupak\b/i,
+    /pakshet/i,
+    /pakingshet/i,
+    /\bpakyu\b/i,
+    /\bhindot\b/i,
+    /\bkantot\b/i,
+    /\bjakol\b/i,
+    /\bbilat\b/i,
+    /\byawa\b/i,
+    /\bputragis\b/i,
+  ];
+
+  const isInappropriate = (str) =>
+    INAPPROPRIATE_PATTERNS.some(pat => pat.test(String(str || "")));
+
   const sanitizeUserInput = (str, maxLen = 2000) => {
     let s = String(str || "").substring(0, maxLen).trim();
     for (const pat of INJECTION_PATTERNS) s = s.replace(pat, "[…]");
@@ -233,6 +275,12 @@ export default function HomePage() {
     if (tab === "url" && !urlVal.trim()) { setError("Please enter a URL first."); return; }
     if (tab === "youtube" && !ytVal.trim()) { setError("Please enter a YouTube URL first."); return; }
     if (tab === "topic" && !topicVal.trim()) { setError("Please enter a topic first."); return; }
+
+    const inputToCheck = tab === "topic" ? topicVal : tab === "text" ? text.substring(0, 2000) : tab === "url" ? urlVal : tab === "youtube" ? ytVal : "";
+    if (inputToCheck && isInappropriate(inputToCheck)) {
+      setError("This content is not appropriate and cannot be used to generate a quiz. Please enter a different topic.");
+      return;
+    }
 
     setIsGenerating(true);
     const warmupTimer = setTimeout(() => setGenStatus("Warming up AI model — this may take up to 30s..."), 8000);
