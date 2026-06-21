@@ -18,8 +18,9 @@ function sanitizeQuestions(questions) {
   }));
 }
 
-export async function shareQuizPublicly(questions, topic, authorName, uid) {
-  const res = await fetch("https://quizscan-94acb-default-rtdb.asia-southeast1.firebasedatabase.app/shared_quizzes.json", {
+export async function shareQuizPublicly(questions, topic, authorName, uid, idToken) {
+  const url = `https://quizscan-94acb-default-rtdb.asia-southeast1.firebasedatabase.app/shared_quizzes.json${idToken ? `?auth=${idToken}` : ""}`;
+  const res = await fetch(url, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       topic: sanitizeField(topic || "Untitled Quiz", 100),
@@ -31,7 +32,9 @@ export async function shareQuizPublicly(questions, topic, authorName, uid) {
       category: "General", reportCount: 0,
     }),
   });
-  return res.json();
+  const data = await res.json();
+  if (data?.error) throw new Error(data.error);
+  return data;
 }
 
 const CATEGORIES = ["All", "Science", "History", "Math", "Technology", "Language", "Art", "Sports", "General"];

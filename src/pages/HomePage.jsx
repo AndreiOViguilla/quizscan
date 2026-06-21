@@ -598,7 +598,8 @@ export default function HomePage() {
                   if (!user) { setShowAuthModal(true); return; }
                   requireVerify(async () => {
                     const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                    await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
+                    const idToken = await user.getIdToken();
+                    await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid, idToken);
                     setShared(true);
                   });
                 }}>
@@ -804,7 +805,8 @@ export default function HomePage() {
                 if (!user) { setShowAuthModal(true); return; }
                 requireVerify(async () => {
                   const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                  await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid);
+                  const idToken = await user.getIdToken();
+                    await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid, idToken);
                   setShared(true);
                 });
               }}>
