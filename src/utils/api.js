@@ -69,6 +69,48 @@ export async function generateText(messages, maxTokens = 8000, cfToken = null) {
     failures.push(e.message || "Groq unreachable");
   }
 
+  // 3. Fall back to Gemini
+  try {
+    const res = await fetch("/api/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, maxTokens }),
+    });
+    const data = await res.json();
+    if (res.ok && data.content) return data.content;
+    failures.push(data.error || "Gemini failed");
+  } catch (e) {
+    failures.push(e.message || "Gemini unreachable");
+  }
+
+  // 4. Fall back to Mistral
+  try {
+    const res = await fetch("/api/mistral", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, maxTokens }),
+    });
+    const data = await res.json();
+    if (res.ok && data.content) return data.content;
+    failures.push(data.error || "Mistral failed");
+  } catch (e) {
+    failures.push(e.message || "Mistral unreachable");
+  }
+
+  // 5. Fall back to OpenRouter
+  try {
+    const res = await fetch("/api/openrouter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, maxTokens }),
+    });
+    const data = await res.json();
+    if (res.ok && data.content) return data.content;
+    failures.push(data.error || "OpenRouter failed");
+  } catch (e) {
+    failures.push(e.message || "OpenRouter unreachable");
+  }
+
   const isRateLimit = failures.some(f => f.includes("rate limit") || f.includes("429"));
   throw new Error(
     isRateLimit
