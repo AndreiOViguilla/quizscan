@@ -112,6 +112,7 @@ export default function QuizPage() {
         e.preventDefault();
         const page = document.querySelector(".quiz-page");
         if (page) { page.style.filter = "blur(12px)"; setTimeout(() => { page.style.filter = ""; }, 2000); }
+        showToast("Screenshot detected — quiz content is protected.", "error");
         return;
       }
       if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
