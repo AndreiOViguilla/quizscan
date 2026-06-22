@@ -8,10 +8,20 @@ function cleanText(raw) {
   return raw
     .replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n")
     .replace(/[""]/g, '"').replace(/['']/g, "'")
-    // Normalize dashes so "1937–1945" stays readable and doesn't merge into "19371945"
+    // Normalize dashes so "1937–1945" stays readable
     .replace(/[–—]/g, " - ")
-    // Strip Wikipedia-style citation brackets [1], [12][13], [note 1]
-    .replace(/\[[\w\s,;:]+\]/g, "")
+    // Strip citation brackets [1], [12][13], [note 1]
+    .replace(/\[[\w\s,;:.]+\]/g, "")
+    // Strip Britannica/web UI artifacts
+    .replace(/\b(IconBritannica|Britannica\s*AI|Ask\s*Anything|Quick\s*Summary|Top\s*Questions?|Related\s*Questions?|Main\s*article\s*:|See\s*also\s*:)/gi, "")
+    // Strip "(Read Author's entry on X)" cross-references
+    .replace(/\(Read\s[^)]{0,80}\)/gi, "")
+    // Strip editor bylines: "Name Editors? Month DD, YYYY •Category"
+    .replace(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+Editors?\s+\w+\s+\d{1,2},\s+\d{4}/g, "")
+    // Strip news bullets: "• 'headline' • Month DD, YYYY, H:MM PM ET (Source)"
+    .replace(/•[^•\n]{0,120}(?:ET|PM|AM)\s*\([^)]{0,40}\)/g, "")
+    // Remove CamelCase-merged words from copy-paste artifacts (e.g. "WarAmerican", "IIRelated")
+    .replace(/([a-z])([A-Z][a-z])/g, "$1 $2")
     .replace(/\s{2,}/g, " ").trim();
 }
 
@@ -91,10 +101,16 @@ function extractSentences(text) {
       const words = s.split(/\s+/);
       const capRatio = words.filter(w => /^[A-Z]/.test(w)).length / words.length;
       if (capRatio > 0.5 && !HAS_VERB.test(s)) return false;
-      // Reject bibliography/reference entries (author, p. N or pp. N-N patterns)
+      // Reject bibliography/reference entries
       if (/\b(pp?\.|ed\.|vol\.|ibid\.|et al\.|doi:|isbn:)/i.test(s)) return false;
-      // Reject sentences with 3+ citation-style numbers still remaining
+      // Reject remaining citation-heavy sentences
       if ((s.match(/\[\d/g) || []).length >= 3) return false;
+      // Reject FAQ-style question sentences (website "Related Questions" sections)
+      if (/^(How|What|Who|Why|When|Where|Which)\s+\w.{5,}\?$/.test(s)) return false;
+      // Reject sentences still containing web UI residue
+      if (/\b(IconBritannica|Ask\s*Anything|Quick\s*Summary|Related\s*Questions?|Britannica\s*AI)\b/i.test(s)) return false;
+      // Reject image caption fragments (pattern: "N of N [proper noun] [action verb]...")
+      if (/^\d+\s+of\s+\d+\s+[A-Z]/.test(s)) return false;
       return true;
     });
   const resolved = resolveCoref(raw);
@@ -258,6 +274,10 @@ function toWhQuestion(sentence) {
   }
   const numMatch = sentence.match(/\b(\d[\d,]*)\s+(?!percent|%|January|February|March|April|May|June|July|August|September|October|November|December)/);
   if (numMatch) {
+    // Skip day-of-month: "September 3", "August 23 - 24"
+    const beforeNum = sentence.slice(0, sentence.indexOf(numMatch[0]));
+    const monthBefore = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+$/i.test(beforeNum);
+    if (monthBefore) return null;
     const q = sentence.replace(numMatch[1], "how many").replace(/[.!?]+$/, "");
     return { question: q.charAt(0).toUpperCase() + q.slice(1) + "?", answer: numMatch[1], type: "number" };
   }
