@@ -359,8 +359,31 @@ export default function HomePage() {
           const d = await r.json();
           if (!r.ok || !d.text) throw new Error(d.error || "OCR failed. Try a clearer image.");
           sourceText = d.text;
+        } else if (tab === "topic" && topicVal.trim()) {
+          setGenStatus("Searching Wikipedia...");
+          try {
+            // Search for the best matching article title first
+            const searchRes = await fetch(
+              `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(topicVal)}&format=json&origin=*&srlimit=1`
+            );
+            const searchData = await searchRes.json();
+            const title = searchData?.query?.search?.[0]?.title;
+            if (!title) throw new Error(`No Wikipedia article found for "${topicVal}". Try a different topic or use the Text tab.`);
+
+            // Fetch the full article extract
+            const articleRes = await fetch(
+              `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=extracts&explaintext=true&format=json&origin=*`
+            );
+            const articleData = await articleRes.json();
+            const page = Object.values(articleData?.query?.pages || {})[0];
+            if (!page?.extract) throw new Error(`Could not retrieve Wikipedia article for "${title}".`);
+            sourceText = page.extract;
+            setGenStatus(`Got Wikipedia: "${title}"`);
+          } catch (e) {
+            throw new Error(e.message || `Wikipedia search failed for "${topicVal}".`);
+          }
         } else {
-          throw new Error("No AI mode only works with Text, URL, YouTube, PDF, and Image tabs.");
+          throw new Error("Please provide a text, URL, YouTube link, PDF, image, or topic.");
         }
         if (!sourceText || sourceText.length < 100) throw new Error("Not enough content found to generate questions.");
         setGenStatus("Generating questions...");
