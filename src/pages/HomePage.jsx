@@ -88,6 +88,28 @@ export default function HomePage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [noAi, setNoAi] = useState(false);
+  const [showMoreTypes, setShowMoreTypes] = useState(false);
+  const [selectedTypes, setSelectedTypes] = useState(new Set(["mixed"]));
+
+  const ALL_TYPES = ["mcq", "tf", "fill", "double_fill", "ordering", "error_id"];
+  const toggleType = (value) => {
+    if (value === "mixed") {
+      setSelectedTypes(new Set(["mixed"]));
+      setQType("mixed");
+      return;
+    }
+    setSelectedTypes(prev => {
+      const next = new Set(prev);
+      next.delete("mixed");
+      if (next.has(value)) { next.delete(value); } else { next.add(value); }
+      if (next.size === 0 || ALL_TYPES.every(t => next.has(t))) {
+        setQType("mixed");
+        return new Set(["mixed"]);
+      }
+      setQType(next.size === 1 ? [...next][0] : "mixed");
+      return next;
+    });
+  };
   const [generated, setGenerated] = useState(null);
   const [quickJoin, setQuickJoin] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -823,7 +845,7 @@ export default function HomePage() {
           {mode !== "study" && (
             <div style={{ marginBottom: 20 }}>
               <label className="field-label" style={{ marginBottom: 8, display: "block" }}>Type</label>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 {[
                   {
                     value: "mixed", label: "Mixed",
@@ -913,13 +935,23 @@ export default function HomePage() {
                       </div>
                     )
                   },
-                ].map(({ value, label, visual }) => (
-                  <button key={value} className={`type-card${qType === value ? " active" : ""}`} onClick={() => setQType(value)}>
-                    <div className="type-card-visual">{visual}</div>
-                    <div className="type-card-label">{label}</div>
-                  </button>
-                ))}
+                ].map(({ value, label, visual }, i) => {
+                  const isHidden = i >= 4 && !showMoreTypes;
+                  const isActive = selectedTypes.has(value) || (value !== "mixed" && selectedTypes.has("mixed"));
+                  if (isHidden) return null;
+                  return (
+                    <button key={value} className={`type-card${isActive ? " active" : ""}`} onClick={() => toggleType(value)}>
+                      <div className="type-card-visual">{visual}</div>
+                      <div className="type-card-label">{label}</div>
+                    </button>
+                  );
+                })}
               </div>
+              <button
+                onClick={() => setShowMoreTypes(s => !s)}
+                style={{ marginTop: 8, background: "none", border: "none", color: "var(--txt2)", fontSize: 12, cursor: "pointer", padding: "4px 0", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4 }}>
+                {showMoreTypes ? "▾ Show less" : "▸ Show more types"}
+              </button>
             </div>
           )}
 

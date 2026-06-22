@@ -218,11 +218,11 @@ export function makeGlobalStyles(dark) {
     .next-btn:hover { background: ${accHover}; }
 
     /* ── TYPE CARD PICKER ── */
-    .type-card { background: ${v.bg2}; border: 1.5px solid ${v.bdr}; border-radius: 10px; padding: 12px 8px 10px; cursor: pointer; transition: all .15s; text-align: center; color: ${v.txt2}; font-family: 'Instrument Sans', sans-serif; }
+    .type-card { background: ${v.bg2}; border: 1.5px solid ${v.bdr}; border-radius: 10px; padding: 16px 8px 12px; cursor: pointer; transition: all .15s; text-align: center; color: ${v.txt2}; font-family: 'Instrument Sans', sans-serif; }
     .type-card:hover { border-color: ${v.bdr2}; background: ${v.bg3}; color: ${v.txt}; }
     .type-card.active { border-color: ${v.txt}; background: ${v.bg3}; color: ${v.txt}; }
-    .type-card-visual { height: 44px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
-    .type-card-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+    .type-card-visual { height: 48px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
+    .type-card-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
 
     /* ── MODE CARD (Scan Mode / AI Models) ── */
     .mode-card { background: ${v.bg2}; border: 1.5px solid ${v.bdr}; border-radius: 10px; padding: 14px 12px 12px; cursor: pointer; transition: all .15s; text-align: center; color: ${v.txt2}; font-family: 'Instrument Sans', sans-serif; display: flex; flex-direction: column; align-items: center; gap: 6px; }
