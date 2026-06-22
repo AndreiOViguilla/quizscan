@@ -348,8 +348,19 @@ export default function HomePage() {
         } else if (tab === "pdf" && file) {
           setGenStatus("Extracting PDF text...");
           sourceText = await extractPdfText(file);
+        } else if (tab === "image" && file) {
+          setGenStatus("Running OCR on image...");
+          const b64 = (await readB64(file)).split(",")[1];
+          const r = await fetch("/api/ocr", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageBase64: b64, mimeType: file.type || "image/jpeg" }),
+          });
+          const d = await r.json();
+          if (!r.ok || !d.text) throw new Error(d.error || "OCR failed. Try a clearer image.");
+          sourceText = d.text;
         } else {
-          throw new Error("No AI mode only works with Text, URL, YouTube, and PDF tabs.");
+          throw new Error("No AI mode only works with Text, URL, YouTube, PDF, and Image tabs.");
         }
         if (!sourceText || sourceText.length < 100) throw new Error("Not enough content found to generate questions.");
         setGenStatus("Generating questions...");
