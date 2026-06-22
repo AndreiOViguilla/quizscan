@@ -816,6 +816,62 @@ async function makeErrorId(sentences, count, usedSentences) {
   return out;
 }
 
+// ── Translation (Python backend on Render) ────────────────────────────────────
+async function translateQuestions(questions, lang) {
+  if (!lang || lang === "English") return questions;
+  const backendUrl = process.env.REACT_APP_BACKEND_URL;
+  if (!backendUrl) return questions;
+
+  const strings = [];
+  const paths = [];
+
+  for (let qi = 0; qi < questions.length; qi++) {
+    const q = questions[qi];
+    strings.push(q.question || ""); paths.push([qi, "question"]);
+    strings.push(q.explanation || ""); paths.push([qi, "explanation"]);
+    if (Array.isArray(q.choices)) q.choices.forEach((c, j) => { strings.push(c); paths.push([qi, "choices", j]); });
+    // fill answer is a word — translate it; tf answer ("True"/"False") is structural — skip
+    if (q.type === "fill" && typeof q.answer === "string") { strings.push(q.answer); paths.push([qi, "answer"]); }
+    if (Array.isArray(q.answers)) q.answers.forEach((a, j) => { strings.push(a); paths.push([qi, "answers", j]); });
+    if (Array.isArray(q.items)) q.items.forEach((item, j) => { strings.push(item); paths.push([qi, "items", j]); });
+    if (Array.isArray(q.spans)) q.spans.forEach((sp, j) => { strings.push(sp); paths.push([qi, "spans", j]); });
+  }
+
+  // Send in chunks of 20 strings per request
+  const CHUNK = 20;
+  const translated = [];
+  for (let i = 0; i < strings.length; i += CHUNK) {
+    const batch = strings.slice(i, i + CHUNK);
+    try {
+      const res = await fetch(`${backendUrl}/translate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texts: batch, target: lang }),
+        signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+      });
+      const data = res.ok ? await res.json() : null;
+      const chunk = data?.translations;
+      translated.push(...(Array.isArray(chunk) && chunk.length === batch.length ? chunk : batch));
+    } catch { translated.push(...batch); }
+  }
+
+  // Deep-copy questions and apply translations
+  const result = questions.map(q => ({
+    ...q,
+    choices: q.choices ? [...q.choices] : q.choices,
+    answers: q.answers ? [...q.answers] : q.answers,
+    items: q.items ? [...q.items] : q.items,
+    spans: q.spans ? [...q.spans] : q.spans,
+  }));
+  for (let k = 0; k < paths.length; k++) {
+    const [qi, field, j] = paths[k];
+    if (!translated[k]) continue;
+    if (j !== undefined) result[qi][field][j] = translated[k];
+    else result[qi][field] = translated[k];
+  }
+  return result;
+}
+
 // ── Neural sentence scoring (HuggingFace all-MiniLM-L6-v2) ───────────────────
 function cosineSimilarity(a, b) {
   let dot = 0, normA = 0, normB = 0;
@@ -852,7 +908,7 @@ async function fetchEmbeddings(sentences) {
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export async function generateNoAiQuiz(text, numQ, qType) {
+export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   if (text.length > 50000) text = text.slice(0, 50000);
   const sentences = extractSentences(text);
   const sentencesOrdered = extractSentences(text, { sorted: false });
@@ -905,6 +961,7 @@ export async function generateNoAiQuiz(text, numQ, qType) {
     qs = pool.slice(0, numQ);
   }
   if (!qs.length) throw new Error("Could not extract enough questions. Try a source with more complete sentences.");
+  if (lang && lang !== "English") qs = await translateQuestions(qs, lang);
   return qs;
 }
 

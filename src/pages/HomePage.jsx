@@ -409,7 +409,7 @@ export default function HomePage() {
         }
         if (!sourceText || sourceText.length < 100) throw new Error("Not enough content found to generate questions.");
         setGenStatus("Generating questions...");
-        const qs = await generateNoAiQuiz(sourceText, numQ, qType);
+        const qs = await generateNoAiQuiz(sourceText, numQ, qType, lang);
         if (!qs.length) throw new Error("Could not extract enough questions. Try a different source.");
         await startQuiz(qs);
       } catch (e) {
