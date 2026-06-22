@@ -21,10 +21,12 @@ function resolveCoref(sentences) {
     let resolved = s;
 
     if (lastPerson) {
-      resolved = resolved.replace(/\b(He|She|Him|Her|His)\b/g, (m) => {
-        const lm = m.toLowerCase();
-        return (lm === "his" || lm === "her") ? `${lastPerson}'s` : lastPerson;
-      });
+      // Expand contractions first: "He's"/"She's" (= "He is") → "[Name] is"
+      resolved = resolved.replace(/\b(He|She)'s\b/g, `${lastPerson} is`);
+      // Possessive pronouns
+      resolved = resolved.replace(/\b(His|Her)\b/g, `${lastPerson}'s`);
+      // Subject/object pronouns (not followed by apostrophe)
+      resolved = resolved.replace(/\b(He|She|Him)(?!')\b/g, lastPerson);
     }
     if (lastPlural) {
       resolved = resolved.replace(/\b(They|Them|Their)\b/g, (m) => {
@@ -35,9 +37,17 @@ function resolveCoref(sentences) {
       resolved = resolved.replace(/\bIt\b/g, lastThing);
     }
 
+    // Update antecedent tracking from original sentence
     const persons = s.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b/g)?.filter(m => !STOP.has(m.toLowerCase())) || [];
     if (persons.length) {
-      lastPerson = persons.find(p => /^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(p)) || persons[0];
+      // Prefer full names (multi-word), otherwise last non-place entity (most recently introduced)
+      const multiWord = persons.find(p => /^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(p));
+      if (multiWord) {
+        lastPerson = multiWord;
+      } else {
+        const nonPlace = [...persons].reverse().find(p => detectEntityType(p) !== "place");
+        lastPerson = nonPlace || persons[persons.length - 1];
+      }
     }
     const pluralMatch = s.match(/\bThe\s+([a-z]+s)\b/);
     if (pluralMatch) lastPlural = pluralMatch[1];
@@ -64,10 +74,18 @@ function scoreSentence(s, idx, total) {
 }
 
 function extractSentences(text) {
+  const HAS_VERB = /\b(is|are|was|were|had|has|did|do|does|said|told|made|went|came|felt|looked|asked|moved|played|built|wrote|found|knew|wanted|liked|began|started|ended|called|named|liked|showed|gave|took|kept|left|put|got|set|ran|saw|thought|brought|bought|tried|heard|felt|stood|fell|held|grew|sent|met|led|read|lost|spent|born|raised|died|lived)\b/i;
   const raw = cleanText(text)
     .split(/(?<=[.!?])\s+(?=[A-Z"(])/)
     .map(s => s.trim())
-    .filter(s => s.length > 35 && s.split(" ").length >= 6);
+    .filter(s => {
+      if (s.length <= 35 || s.split(" ").length < 6) return false;
+      // Reject navigation/list-like text: >50% capitalized words and no verb
+      const words = s.split(/\s+/);
+      const capRatio = words.filter(w => /^[A-Z]/.test(w)).length / words.length;
+      if (capRatio > 0.5 && !HAS_VERB.test(s)) return false;
+      return true;
+    });
   const resolved = resolveCoref(raw);
   return resolved
     .map((s, i) => ({ s, score: scoreSentence(s, i, resolved.length) }))
@@ -143,22 +161,22 @@ function extractDefinition(sentence) {
 
 // ── Cause & Effect Detection ──────────────────────────────────────────────────
 function extractCauseEffect(sentence) {
-  // "A because B" → "Why [A]?"
-  const becauseM = sentence.match(/^(.{15,}?)\s+because\s+(.{10,})$/i);
+  // "A because B" → "What was the reason that A?"
+  const becauseM = sentence.match(/^(.{15,150}?)\s+because\s+(.{10,})$/i);
   if (becauseM) {
     const effect = becauseM[1].replace(/[.!?]+$/, "");
     const cause = becauseM[2].replace(/[.!?]+$/, "");
-    return { question: `Why did ${effect.charAt(0).toLowerCase() + effect.slice(1)}?`, answer: cause };
+    return { question: `What was the reason that ${effect.charAt(0).toLowerCase() + effect.slice(1)}?`, answer: cause };
   }
   // "A, therefore/thus/hence B" → "What resulted from A?"
-  const resultM = sentence.match(/^(.{10,}?),?\s+(?:therefore|thus|hence|consequently|as a result)\s+(.{10,})$/i);
+  const resultM = sentence.match(/^(.{10,150}?),?\s+(?:therefore|thus|hence|consequently|as a result)\s+(.{10,})$/i);
   if (resultM) {
     const cause = resultM[1].replace(/[.!?]+$/, "");
     const effect = resultM[2].replace(/[.!?]+$/, "");
     return { question: `What resulted from ${cause.charAt(0).toLowerCase() + cause.slice(1)}?`, answer: effect };
   }
   // "A led to/caused/resulted in B"
-  const causedM = sentence.match(/^(.{10,}?)\s+(?:led to|caused|resulted in|triggered|produced)\s+(.{10,})$/i);
+  const causedM = sentence.match(/^(.{10,150}?)\s+(?:led to|caused|resulted in|triggered|produced)\s+(.{10,})$/i);
   if (causedM) {
     const cause = causedM[1].replace(/[.!?]+$/, "");
     const effect = causedM[2].replace(/[.!?]+$/, "");
@@ -169,23 +187,22 @@ function extractCauseEffect(sentence) {
 
 // ── Sequence Detection ────────────────────────────────────────────────────────
 function extractSequence(sentence) {
-  // "After X, Y happened"
-  const afterM = sentence.match(/^After\s+(.{5,}?),\s+(.{10,})$/i);
+  // "After X, Y happened" — cap X at 60 chars to avoid giant questions
+  const afterM = sentence.match(/^After\s+(.{5,60}?),\s+(.{10,})$/i);
   if (afterM) {
     return { question: `What happened after ${afterM[1].toLowerCase()}?`, answer: afterM[2].replace(/[.!?]+$/, "") };
   }
-  // "X, then Y"
-  const thenM = sentence.match(/^(.{10,}?),?\s+then\s+(.{10,})$/i);
+  // "X, then Y" — cap X at 60 chars
+  const thenM = sentence.match(/^(.{10,60}?),?\s+then\s+(.{10,})$/i);
   if (thenM) {
     const step = thenM[1].replace(/[.!?]+$/, "");
     return { question: `What followed "${step}"?`, answer: thenM[2].replace(/[.!?]+$/, "") };
   }
   // "Before X, Y"
-  const beforeM = sentence.match(/^Before\s+(.{5,}?),\s+(.{10,})$/i);
+  const beforeM = sentence.match(/^Before\s+(.{5,60}?),\s+(.{10,})$/i);
   if (beforeM) {
     return { question: `What occurred before ${beforeM[1].toLowerCase()}?`, answer: beforeM[2].replace(/[.!?]+$/, "") };
   }
-  // "First X. Then Y." handled across adjacent sentences is too complex; skip
   return null;
 }
 
@@ -284,6 +301,12 @@ function negateSentence(sentence, allEntities) {
   const verbMatch = sentence.match(/\b(is|are|was|were)\b/i);
   if (verbMatch) return sentence.replace(verbMatch[0], `${verbMatch[0]} not`);
   return null;
+}
+
+// ── Answer trimmer ────────────────────────────────────────────────────────────
+function trimAnswer(text, maxLen = 80) {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen).replace(/\s+\S*$/, "") + "…";
 }
 
 // ── Shuffle ───────────────────────────────────────────────────────────────────
@@ -402,9 +425,9 @@ function makeCauseEffect(sentences, count, usedSentences) {
     if (usedSentences.has(s)) continue;
     const ce = extractCauseEffect(s);
     if (!ce) continue;
-    if (ce.answer.length < 5 || ce.answer.length > 200) continue;
+    if (ce.answer.length < 5) continue;
     usedSentences.add(s);
-    out.push({ type: "fill", question: ce.question, answer: ce.answer, explanation: `From source: "${s}"` });
+    out.push({ type: "fill", question: ce.question, answer: trimAnswer(ce.answer), explanation: `From source: "${s}"` });
   }
   return out;
 }
@@ -417,9 +440,9 @@ function makeSequence(sentences, count, usedSentences) {
     if (usedSentences.has(s)) continue;
     const seq = extractSequence(s);
     if (!seq) continue;
-    if (seq.answer.length < 5 || seq.answer.length > 200) continue;
+    if (seq.answer.length < 5) continue;
     usedSentences.add(s);
-    out.push({ type: "fill", question: seq.question, answer: seq.answer, explanation: `From source: "${s}"` });
+    out.push({ type: "fill", question: seq.question, answer: trimAnswer(seq.answer), explanation: `From source: "${s}"` });
   }
   return out;
 }
