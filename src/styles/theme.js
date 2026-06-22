@@ -42,6 +42,8 @@ export function makeGlobalStyles(dark) {
 
     /* ── LAYOUT ── */
     .app { min-height: 100vh; background: ${v.bg}; display: flex; flex-direction: column; }
+    .app-shell { min-height: 100vh; background: ${v.bg}; display: flex; flex-direction: column; }
+    .app-body { flex: 1; display: flex; flex-direction: column; }
     .page { flex: 1; max-width: 760px; margin: 0 auto; width: 100%; padding: 72px 24px 48px; animation: slide-in .2s ease; }
     @media (max-width: 480px) { .page { padding: 64px 14px 40px; } }
 

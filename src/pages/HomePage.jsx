@@ -777,7 +777,7 @@ export default function HomePage() {
           <button className="back-btn" onClick={() => setShowSettings(false)}>← Back</button>
           <div className="page-heading">Settings</div>
 
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "auto auto 1fr", gap: 12, alignItems: "end", marginBottom: 20 }}>
             <div>
               <label className="field-label">Questions</label>
               <select className="field-select" value={numQ} onChange={e => setNumQ(Number(e.target.value))}>
@@ -792,7 +792,7 @@ export default function HomePage() {
             </div>
             <div>
               <label className="field-label">Your Name</label>
-              <input className="field-input" style={{ width: 140 }} placeholder="e.g. Alex"
+              <input className="field-input" placeholder="e.g. Alex"
                 value={playerName} onChange={e => setPlayerName(e.target.value)} />
             </div>
           </div>
@@ -877,11 +877,15 @@ export default function HomePage() {
           )}
 
           {mode === "quiz" && (
-            <div className="toggles-row" style={{ marginBottom: 12 }}>
-              <Toggle on={useTimer} onChange={setUseTimer} label="Timer (30s)" />
-              <Toggle on={useStreak} onChange={setUseStreak} label="Streak" />
-              <Toggle on={useSounds} onChange={setUseSounds} label="Sounds" />
-              <Toggle on={noAi} onChange={setNoAi} label="No AI (scan only)" />
+            <div style={{ marginBottom: 12 }}>
+              <div className="toggles-row" style={{ marginTop: 16, marginBottom: 10 }}>
+                <Toggle on={useTimer} onChange={setUseTimer} label="Timer (30s)" />
+                <Toggle on={useStreak} onChange={setUseStreak} label="Streak" />
+                <Toggle on={useSounds} onChange={setUseSounds} label="Sounds" />
+              </div>
+              <div style={{ borderTop: "1px solid var(--bdr)", paddingTop: 10 }}>
+                <Toggle on={noAi} onChange={setNoAi} label="No AI (scan only)" />
+              </div>
             </div>
           )}
           {mode === "quiz" && (
