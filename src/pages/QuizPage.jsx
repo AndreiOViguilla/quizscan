@@ -32,6 +32,7 @@ export default function QuizPage() {
   const [gameOver, setGameOver] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [dfSlots, setDfSlots] = useState([null, null]);
+  const [orderSlots, setOrderSlots] = useState([null, null, null]);
   const [syncCurrentQ, setSyncCurrentQ] = useState(null);
 
   // Speedrun: track elapsed seconds
@@ -184,8 +185,18 @@ export default function QuizPage() {
       } else {
         setDfSlots([null, null]);
       }
+      if (q?.type === "ordering") {
+        setOrderSlots(Array(q.items?.length || 3).fill(null));
+      } else {
+        setOrderSlots([null, null, null]);
+      }
     } else {
       setSelected(null); setFillVal(""); setRevealed(false); setDfSlots([null, null]);
+      if (q?.type === "ordering") {
+        setOrderSlots(Array(q.items?.length || 3).fill(null));
+      } else {
+        setOrderSlots([null, null, null]);
+      }
     }
     setHintUsed(false); setHintText(""); setEliminated([]);
   };
@@ -254,6 +265,14 @@ export default function QuizPage() {
       if (dfSlots.includes(null)) return;
       ua = dfSlots.join(" / ");
       correct = dfSlots.every((s, i) => s?.toLowerCase() === (q.answers?.[i] || "").toLowerCase());
+    } else if (q.type === "ordering") {
+      if (orderSlots.includes(null)) return;
+      ua = orderSlots.join(" ||| ");
+      correct = orderSlots.every((s, i) => s === (q.answers?.[i] || ""));
+    } else if (q.type === "error_id") {
+      ua = force !== null ? force : selected;
+      if (ua === null) return;
+      correct = ua === q.answer;
     } else {
       ua = force !== null ? force : (q.type === "fill" ? fillVal.trim() : selected);
       if (ua === null || ua === "") return;
@@ -316,6 +335,10 @@ export default function QuizPage() {
     } else if (q.type === "fill") {
       const ans = String(q.answer);
       setHintText(`First letter: "${ans[0].toUpperCase()}" (${ans.length} letters)`);
+    } else if (q.type === "ordering") {
+      setHintText(`First sentence starts with: "${(q.answers?.[0] || "").slice(0, 30)}..."`);
+    } else if (q.type === "error_id") {
+      setHintText(`The incorrect word is ${q.spans?.[q.answer]?.length} letters long.`);
     } else {
       setHintText("No hint for True/False.");
     }
@@ -470,7 +493,7 @@ export default function QuizPage() {
 
       <div className="card">
         <div className="q-type-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>{q.type === "mcq" ? "* Multiple Choice" : q.type === "tf" ? "* True / False" : q.type === "double_fill" ? "* Double Blank" : "* Fill in the Blank"}</span>
+          <span>{q.type === "mcq" ? "* Multiple Choice" : q.type === "tf" ? "* True / False" : q.type === "double_fill" ? "* Double Blank" : q.type === "ordering" ? "* Ordering" : q.type === "error_id" ? "* Error Identification" : "* Fill in the Blank"}</span>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             {useTimer && gameMode !== "speedrun" && (
               <span style={{ color: timerColor, fontWeight: 600 }}>{timeLeft}s</span>
@@ -501,6 +524,37 @@ export default function QuizPage() {
                   )}
                 </span>
               ))
+            : q.type === "error_id"
+            ? (() => {
+                const sentence = q.question;
+                const spans = q.spans || [];
+                const parts = [];
+                let cursor = 0;
+                const positions = spans
+                  .map(sp => ({ sp, idx: sentence.toLowerCase().indexOf(sp.toLowerCase()) }))
+                  .filter(p => p.idx !== -1)
+                  .sort((a, b) => a.idx - b.idx);
+                for (const { sp, idx } of positions) {
+                  if (idx > cursor) parts.push(<span key={cursor}>{sentence.slice(cursor, idx)}</span>);
+                  const spanIdx = spans.indexOf(sp);
+                  let cls = "error-span";
+                  if (revealed) cls += spanIdx === q.answer ? " wrong-span" : " correct-span";
+                  else if (selected === spanIdx) cls += " selected-span";
+                  parts.push(
+                    <button key={idx} className={cls} onClick={() => { if (!revealed) setSelected(spanIdx); }}>
+                      {sentence.slice(idx, idx + sp.length)}
+                    </button>
+                  );
+                  cursor = idx + sp.length;
+                }
+                if (cursor < sentence.length) parts.push(<span key={cursor}>{sentence.slice(cursor)}</span>);
+                return (
+                  <div>
+                    <div style={{ fontSize: 12, color: "var(--dim)", marginBottom: 10 }}>Click the word that has been changed to its opposite:</div>
+                    <div className="error-sentence">{parts}</div>
+                  </div>
+                );
+              })()
             : q.question}
         </div>
 
@@ -520,6 +574,37 @@ export default function QuizPage() {
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {q.type === "ordering" && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+              {(q.answers || []).map((_, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", width: 20, flexShrink: 0 }}>{i + 1}.</span>
+                  <button
+                    className={`order-slot${orderSlots[i] ? " filled" : ""}${revealed ? (orderSlots[i] === q.answers?.[i] ? " correct" : " wrong") : ""}`}
+                    onClick={() => { if (revealed || !orderSlots[i]) return; const ns = [...orderSlots]; ns[i] = null; setOrderSlots(ns); }}
+                  >
+                    {orderSlots[i] || <span style={{ opacity: 0.35 }}>Click a sentence below</span>}
+                  </button>
+                </div>
+              ))}
+            </div>
+            {!revealed && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {(q.items || []).map((item, i) => {
+                  const placed = orderSlots.includes(item);
+                  return (
+                    <button key={i} className={`order-item-btn${placed ? " used" : ""}`} disabled={placed}
+                      onClick={() => { if (placed) return; const emptyIdx = orderSlots.indexOf(null); if (emptyIdx !== -1) { const ns = [...orderSlots]; ns[emptyIdx] = item; setOrderSlots(ns); } }}>
+                      {item}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -576,7 +661,7 @@ export default function QuizPage() {
         {revealed && (
           <>
             <div className={`feedback ${answers[current]?.correct ? "correct-fb" : "wrong-fb"}`}>
-              {answers[current]?.correct ? "+ Correct! " : `- Wrong. Answer: ${q.type === "mcq" ? q.choices?.[q.answer] : q.type === "double_fill" ? (q.answers || []).join(" / ") : q.answer}. `}
+              {answers[current]?.correct ? "+ Correct! " : `- Wrong. Answer: ${q.type === "mcq" ? q.choices?.[q.answer] : q.type === "double_fill" ? (q.answers || []).join(" / ") : q.type === "ordering" ? "Order: " + (q.answers || []).map((s, i) => `${i + 1}. ${s.slice(0, 40)}...`).join(" → ") : q.type === "error_id" ? `"${q.spans?.[q.answer]}" was the changed word` : q.answer}. `}
               {q.explanation}
             </div>
             <div className="diff-row">
@@ -607,6 +692,12 @@ export default function QuizPage() {
           )}
           {!revealed && q.type === "double_fill" && (
             <button className="next-btn" onClick={() => submitAnswer()} disabled={dfSlots.includes(null)}>Check →</button>
+          )}
+          {!revealed && q.type === "ordering" && (
+            <button className="next-btn" onClick={() => submitAnswer()} disabled={orderSlots.includes(null)}>Check →</button>
+          )}
+          {!revealed && q.type === "error_id" && (
+            <button className="next-btn" onClick={() => submitAnswer()} disabled={selected === null}>Check →</button>
           )}
           {revealed && isGuestSync && (
             <div style={{ fontSize: 12, opacity: 0.45, padding: "8px 12px", fontStyle: "italic" }}>

@@ -73,8 +73,9 @@ function resolveCoref(sentences) {
 }
 
 // ── Sentence extraction + scoring ─────────────────────────────────────────────
-function scoreSentence(s, idx, total) {
+function scoreSentence(s, idx, total, isParaFirst = false) {
   let score = 0;
+  if (isParaFirst) score += 2;
   if (idx < total * 0.2) score += 2;
   if (/\b(is|are|was|were|defined as|refers to|known as|called)\b/i.test(s)) score += 3;
   if (/\b\d{4}\b/.test(s)) score += 2;
@@ -87,9 +88,22 @@ function scoreSentence(s, idx, total) {
   return score;
 }
 
-function extractSentences(text) {
+function extractSentences(text, { sorted = true } = {}) {
   const HAS_VERB = /\b(is|are|was|were|had|has|did|do|does|said|told|made|went|came|felt|looked|asked|moved|played|built|wrote|found|knew|wanted|liked|began|started|ended|called|named|liked|showed|gave|took|kept|left|put|got|set|ran|saw|thought|brought|bought|tried|heard|felt|stood|fell|held|grew|sent|met|led|read|lost|spent|born|raised|died|lived)\b/i;
   const MONTHS = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/;
+  const SUBJECTIVE = /\b(i think|i believe|perhaps|maybe|it seems|many believe|some say|in my opinion|possibly|probably)\b/i;
+
+  // Build set of paragraph-first sentences
+  const paraFirstSet = new Set(
+    cleanText(text)
+      .split(/\n{2,}/)
+      .map(para => {
+        const parts = para.split(/(?<=[.!?])\s+(?=[A-Z"(])/);
+        return parts.length > 0 ? parts[0].trim() : "";
+      })
+      .filter(Boolean)
+  );
+
   const raw = cleanText(text)
     .split(/(?<=[.!?])\s+(?=[A-Z"(])/)
     .map(s => s.trim())
@@ -97,6 +111,8 @@ function extractSentences(text) {
       if (s.length <= 35 || s.split(" ").length < 6) return false;
       // Reject sentences that are too long to make clean questions
       if (s.length > 350) return false;
+      // Reject subjective/opinion sentences
+      if (SUBJECTIVE.test(s)) return false;
       // Reject navigation/list-like text: >50% capitalized words and no verb
       const words = s.split(/\s+/);
       const capRatio = words.filter(w => /^[A-Z]/.test(w)).length / words.length;
@@ -114,8 +130,9 @@ function extractSentences(text) {
       return true;
     });
   const resolved = resolveCoref(raw);
-  return resolved
-    .map((s, i) => ({ s, score: scoreSentence(s, i, resolved.length) }))
+  const scored = resolved.map((s, i) => ({ s, score: scoreSentence(s, i, resolved.length, paraFirstSet.has(raw[i])) }));
+  if (!sorted) return scored.map(x => x.s);
+  return scored
     .sort((a, b) => b.score - a.score)
     .map(x => x.s);
 }
@@ -377,7 +394,7 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
     const wh = toWhQuestion(s);
     if (wh && questionOk(wh.question)) {
       usedSentences.add(s);
-      out.push({ type: "fill", question: wh.question, answer: wh.answer, explanation: `From source: "${s}"` });
+      out.push({ type: "fill", question: wh.question, answer: wh.answer, difficulty: "medium", explanation: `From source: "${s}"` });
       continue;
     }
     const term = extractKeyTerm(s, tfidfScores);
@@ -387,33 +404,37 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
     const q = `Fill in the blank: "${kwic}"`;
     if (!questionOk(q)) continue;
     usedSentences.add(s);
-    out.push({ type: "fill", question: q, answer: term, explanation: `From source: "${s}"` });
+    out.push({ type: "fill", question: q, answer: term, difficulty: "medium", explanation: `From source: "${s}"` });
   }
   return out;
 }
 
-function makeTF(sentences, count, allEntities, usedSentences) {
+async function makeTF(sentences, count, allEntities, usedSentences) {
   const out = [];
+  const NEGATION = /\b(not|never|no one|nobody|nothing|nowhere|neither|nor|without|lack|absence)\b/i;
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
     const q = s.replace(/[.!?]+$/, "");
     if (!questionOk(q)) continue;
     if (Math.random() > 0.4) {
+      if (NEGATION.test(s)) continue;
       usedSentences.add(s);
-      out.push({ type: "tf", question: q, answer: "True", explanation: "This statement appears directly in the source." });
+      out.push({ type: "tf", question: q, answer: "True", difficulty: "easy", explanation: "This statement appears directly in the source." });
     } else {
-      const neg = negateSentence(s, allEntities);
+      // Try antonym swap via Datamuse first for a more believable false statement
+      let neg = typeof negateWithDatamuse === "function" ? await negateWithDatamuse(s) : null;
+      if (!neg) neg = negateSentence(s, allEntities);
       if (neg && questionOk(neg)) {
         usedSentences.add(s);
-        out.push({ type: "tf", question: neg.replace(/[.!?]+$/, ""), answer: "False", explanation: `Correct: "${s}"` });
+        out.push({ type: "tf", question: neg.replace(/[.!?]+$/, ""), answer: "False", difficulty: "medium", explanation: `Correct: "${s}"` });
       }
     }
   }
   return out;
 }
 
-function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
+async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
   const out = [];
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
@@ -427,18 +448,31 @@ function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
       if (questionOk(defQ) && defDistractors.length >= 3) {
         const choices = shuffle([def.subject, ...shuffle(defDistractors).slice(0, 3)]);
         usedSentences.add(s);
-        out.push({ type: "mcq", question: defQ, choices, answer: choices.indexOf(def.subject), explanation: `From source: "${s}"` });
+        out.push({ type: "mcq", question: defQ, choices, answer: choices.indexOf(def.subject), difficulty: "medium", explanation: `From source: "${s}"` });
         continue;
       }
     }
 
     const wh = toWhQuestion(s);
     if (wh && questionOk(wh.question)) {
-      const distractors = getDistractors(wh.answer, allTerms, wh.type, sTerms);
+      let distractors = getDistractors(wh.answer, allTerms, wh.type, sTerms);
+      // Datamuse fallback for common-word answers (non-proper-noun, non-number)
+      if (distractors.length < 3 && !/^[A-Z]/.test(wh.answer) && !/^\d/.test(wh.answer)) {
+        try {
+          const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
+          const [antRes, trgRes] = await Promise.all([
+            fetch(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(wh.answer.toLowerCase())}&max=5`, { signal }),
+            fetch(`https://api.datamuse.com/words?rel_trg=${encodeURIComponent(wh.answer.toLowerCase())}&max=8`, { signal }),
+          ]);
+          const [antData, trgData] = await Promise.all([antRes.ok ? antRes.json() : [], trgRes.ok ? trgRes.json() : []]);
+          const apiWords = [...antData, ...trgData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== wh.answer.toLowerCase());
+          if (apiWords.length >= 3) distractors = shuffle(apiWords).slice(0, 3);
+        } catch {}
+      }
       if (distractors.length < 3) continue;
       const choices = shuffle([wh.answer, ...distractors.slice(0, 3)]);
       usedSentences.add(s);
-      out.push({ type: "mcq", question: wh.question, choices, answer: choices.indexOf(wh.answer), explanation: `From source: "${s}"` });
+      out.push({ type: "mcq", question: wh.question, choices, answer: choices.indexOf(wh.answer), difficulty: "medium", explanation: `From source: "${s}"` });
       continue;
     }
 
@@ -449,11 +483,24 @@ function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
     const kwicQ = `Choose the correct answer: "${kwic}"`;
     if (!questionOk(kwicQ)) continue;
     const type = detectEntityType(answer);
-    const distractors = getDistractors(answer, allTerms, type, sTerms);
+    let distractors = getDistractors(answer, allTerms, type, sTerms);
+    // Datamuse fallback for common-word answers (non-proper-noun, non-number)
+    if (distractors.length < 3 && !/^[A-Z]/.test(answer) && !/^\d/.test(answer)) {
+      try {
+        const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
+        const [antRes, trgRes] = await Promise.all([
+          fetch(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(answer.toLowerCase())}&max=5`, { signal }),
+          fetch(`https://api.datamuse.com/words?rel_trg=${encodeURIComponent(answer.toLowerCase())}&max=8`, { signal }),
+        ]);
+        const [antData, trgData] = await Promise.all([antRes.ok ? antRes.json() : [], trgRes.ok ? trgRes.json() : []]);
+        const apiWords = [...antData, ...trgData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== answer.toLowerCase());
+        if (apiWords.length >= 3) distractors = shuffle(apiWords).slice(0, 3);
+      } catch {}
+    }
     if (distractors.length < 3) continue;
     const choices = shuffle([answer, ...distractors.slice(0, 3)]);
     usedSentences.add(s);
-    out.push({ type: "mcq", question: kwicQ, choices, answer: choices.indexOf(answer), explanation: `From source: "${s}"` });
+    out.push({ type: "mcq", question: kwicQ, choices, answer: choices.indexOf(answer), difficulty: "medium", explanation: `From source: "${s}"` });
   }
   return out;
 }
@@ -467,7 +514,7 @@ function makeCauseEffect(sentences, count, usedSentences) {
     const ce = extractCauseEffect(s);
     if (!ce || !questionOk(ce.question) || ce.answer.length < 5 || ce.answer.length > 60) continue;
     usedSentences.add(s);
-    out.push({ type: "fill", question: ce.question, answer: trimAnswer(ce.answer), explanation: `From source: "${s}"` });
+    out.push({ type: "fill", question: ce.question, answer: trimAnswer(ce.answer), difficulty: "hard", explanation: `From source: "${s}"` });
   }
   return out;
 }
@@ -481,7 +528,7 @@ function makeSequence(sentences, count, usedSentences) {
     const seq = extractSequence(s);
     if (!seq || !questionOk(seq.question) || seq.answer.length < 5 || seq.answer.length > 60) continue;
     usedSentences.add(s);
-    out.push({ type: "fill", question: seq.question, answer: trimAnswer(seq.answer), explanation: `From source: "${s}"` });
+    out.push({ type: "fill", question: seq.question, answer: trimAnswer(seq.answer), difficulty: "medium", explanation: `From source: "${s}"` });
   }
   return out;
 }
@@ -499,7 +546,7 @@ function makeComparison(sentences, count, allTerms, usedSentences) {
     if (distractors.length < 3) continue;
     const choices = shuffle([cmp.answer, ...distractors.slice(0, 3)]);
     usedSentences.add(s);
-    out.push({ type: "mcq", question: cmp.question, choices, answer: choices.indexOf(cmp.answer), explanation: `From source: "${s}"` });
+    out.push({ type: "mcq", question: cmp.question, choices, answer: choices.indexOf(cmp.answer), difficulty: "medium", explanation: `From source: "${s}"` });
   }
   return out;
 }
@@ -572,7 +619,7 @@ function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) 
     const choices = shuffle([...answers, ...distractors].map(capitalize));
 
     usedSentences.add(s);
-    out.push({ type: "double_fill", question, answers, choices, explanation: `From source: "${s}"` });
+    out.push({ type: "double_fill", question, answers, choices, difficulty: "hard", explanation: `From source: "${s}"` });
   }
   return out;
 }
@@ -659,7 +706,87 @@ async function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSen
     const choiceList = [answerDisplay, ...distractors.map(d => d.charAt(0).toUpperCase() + d.slice(1))];
     const choices = shuffle(choiceList);
     usedSentences.add(s);
-    out.push({ type: "mcq", question: `Which word best fits: "${kwic}"?`, choices, answer: choices.indexOf(answerDisplay), explanation: `From source: "${s}"` });
+    out.push({ type: "mcq", question: `Which word best fits: "${kwic}"?`, choices, answer: choices.indexOf(answerDisplay), difficulty: "hard", explanation: `From source: "${s}"` });
+  }
+  return out;
+}
+
+// ── Main Idea question ────────────────────────────────────────────────────────
+function makeMainIdea(sentences, usedSentences) {
+  const available = sentences.filter(s => !usedSentences.has(s));
+  if (available.length < 4) return [];
+  const mainIdea = available[0];
+  const distractors = available.slice(1, 4);
+  const choices = shuffle([mainIdea, ...distractors]).map(c => c.length > 120 ? c.slice(0, 117) + "..." : c);
+  const answerIdx = choices.findIndex(c => c.startsWith(mainIdea.slice(0, 30)));
+  usedSentences.add(mainIdea);
+  return [{ type: "mcq", question: "Which sentence best states the main idea of the passage?", choices, answer: answerIdx, difficulty: "medium", explanation: `Main idea: "${mainIdea}"` }];
+}
+
+// ── Ordering questions ────────────────────────────────────────────────────────
+function makeOrdering(orderedSentences, count, usedSentences) {
+  const out = [];
+  const SEQ = /\b(first|second|then|next|after|before|finally|initially|later|meanwhile|subsequently|afterward)\b/i;
+  for (let i = 0; i <= orderedSentences.length - 3 && out.length < count; i++) {
+    const group = orderedSentences.slice(i, i + 3);
+    if (group.some(s => usedSentences.has(s))) continue;
+    if (!group.some(s => SEQ.test(s))) continue;
+    if (group.some(s => !questionOk(s))) continue;
+    const correct = [...group];
+    let scrambled = shuffle([...group]);
+    let tries = 0;
+    while (scrambled.every((s, j) => s === correct[j]) && tries++ < 10) scrambled = shuffle([...group]);
+    group.forEach(s => usedSentences.add(s));
+    out.push({ type: "ordering", question: "Arrange these sentences in the correct order:", items: scrambled, answers: correct, difficulty: "hard", explanation: `Correct order: 1. "${correct[0].slice(0, 60)}..." 2. "${correct[1].slice(0, 60)}..." 3. "${correct[2].slice(0, 60)}..."` });
+  }
+  return out;
+}
+
+// ── Error Identification questions ────────────────────────────────────────────
+async function makeErrorId(sentences, count, usedSentences) {
+  const out = [];
+  for (const s of shuffle(sentences)) {
+    if (out.length >= count) break;
+    if (usedSentences.has(s)) continue;
+    const wordRe = /\b([a-z]{4,})\b/gi;
+    const candidates = [];
+    let m;
+    while ((m = wordRe.exec(s)) !== null) {
+      const w = m[1].toLowerCase();
+      if (STOP.has(w)) continue;
+      const pos = inferPos(w, s.slice(0, m.index));
+      if (pos === "adj" || pos === "adv") candidates.push({ word: w, index: m.index, raw: m[1] });
+    }
+    if (!candidates.length) continue;
+    let swapped = null, errorWord = null, errorOriginal = null;
+    for (const { word, index, raw } of shuffle(candidates).slice(0, 4)) {
+      try {
+        const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
+        const res = await fetch(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(word)}&max=3`, { signal });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const ant = data.map(d => d.word).find(w => w && !w.includes(" "));
+        if (!ant) continue;
+        const replacement = raw[0] === raw[0].toUpperCase() ? ant.charAt(0).toUpperCase() + ant.slice(1) : ant;
+        swapped = s.slice(0, index) + replacement + s.slice(index + raw.length);
+        errorWord = replacement; errorOriginal = raw;
+        break;
+      } catch {}
+    }
+    if (!swapped || !errorWord) continue;
+    // Find 3 other nouns/content words as decoy spans
+    const decoys = [];
+    const decoyRe = /\b([A-Za-z]{4,})\b/g;
+    while ((m = decoyRe.exec(swapped)) !== null) {
+      const w = m[1];
+      if (w.toLowerCase() === errorWord.toLowerCase() || STOP.has(w.toLowerCase())) continue;
+      decoys.push(w);
+    }
+    if (decoys.length < 3) continue;
+    const spans = shuffle([errorWord, ...shuffle(decoys).slice(0, 3)]);
+    const answer = spans.findIndex(sp => sp.toLowerCase() === errorWord.toLowerCase());
+    usedSentences.add(s);
+    out.push({ type: "error_id", question: swapped.replace(/[.!?]+$/, ""), spans, answer, difficulty: "hard", explanation: `"${errorWord}" should be "${errorOriginal}". Original: "${s}"` });
   }
   return out;
 }
@@ -667,6 +794,7 @@ async function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSen
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function generateNoAiQuiz(text, numQ, qType) {
   const sentences = extractSentences(text);
+  const sentencesOrdered = extractSentences(text, { sorted: false });
   if (sentences.length < 5) throw new Error("Not enough content to generate questions. Try adding more text.");
 
   const tfidfScores = tfidf(sentences);
@@ -675,22 +803,30 @@ export async function generateNoAiQuiz(text, numQ, qType) {
 
   let qs;
   if (qType === "fill") qs = makeFill(sentences, numQ, tfidfScores, usedSentences);
-  else if (qType === "tf") qs = makeTF(sentences, numQ, allTerms, usedSentences);
-  else if (qType === "mcq") qs = makeMCQ(sentences, numQ, tfidfScores, allTerms, usedSentences);
+  else if (qType === "tf") qs = await makeTF(sentences, numQ, allTerms, usedSentences);
+  else if (qType === "mcq") qs = await makeMCQ(sentences, numQ, tfidfScores, allTerms, usedSentences);
   else if (qType === "double_fill") qs = makeDoubleFill(sentences, numQ, tfidfScores, allTerms, usedSentences);
   else {
     // Mixed: generate from all types, shuffle, take numQ
     const q = Math.ceil(numQ / 3);
-    const vocabQs = await makeVocabContext(sentences, q, tfidfScores, allTerms, usedSentences);
+    const [tfQs, vocabQs, mcqQs, errorQs] = await Promise.all([
+      makeTF(sentences, q, allTerms, usedSentences),
+      makeVocabContext(sentences, q, tfidfScores, allTerms, usedSentences),
+      makeMCQ(sentences, q, tfidfScores, allTerms, usedSentences),
+      makeErrorId(sentences, Math.ceil(q / 2), usedSentences),
+    ]);
     const pool = shuffle([
-      ...makeMCQ(sentences, q, tfidfScores, allTerms, usedSentences),
-      ...makeTF(sentences, q, allTerms, usedSentences),
+      ...mcqQs,
+      ...tfQs,
       ...makeFill(sentences, q, tfidfScores, usedSentences),
       ...makeCauseEffect(sentences, q, usedSentences),
       ...makeSequence(sentences, q, usedSentences),
       ...makeComparison(sentences, q, allTerms, usedSentences),
       ...makeDoubleFill(sentences, q, tfidfScores, allTerms, usedSentences),
+      ...makeOrdering(sentencesOrdered, Math.ceil(q / 2), usedSentences),
+      ...makeMainIdea(sentences, usedSentences),
       ...vocabQs,
+      ...errorQs,
     ]);
     qs = pool.slice(0, numQ);
   }

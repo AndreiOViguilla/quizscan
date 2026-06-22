@@ -232,6 +232,23 @@ export function makeGlobalStyles(dark) {
     .df-word-btn:hover:not(.used) { border-color: ${v.bdr2}; background: ${v.bg2}; }
     .df-word-btn.used { opacity: .3; cursor: default; }
 
+    /* ── ORDERING ── */
+    .order-slot { display: block; width: 100%; padding: 10px 14px; background: ${v.bg3}; border: 1.5px dashed ${v.bdr2}; border-radius: 8px; font-family: 'Instrument Sans', sans-serif; font-size: 13px; font-weight: 500; color: ${v.txt}; cursor: pointer; text-align: left; transition: all .15s; min-height: 42px; }
+    .order-slot.filled { border-style: solid; background: ${v.bg2}; }
+    .order-slot.filled:hover { border-color: ${v.txt2}; }
+    .order-slot.correct { border-color: ${v.bdr2}; background: ${v.bg3}; }
+    .order-slot.wrong { border-color: #ef4444; background: ${dark ? "#2d1b1b" : "#fef2f2"}; color: ${dark ? "#fca5a5" : "#dc2626"}; }
+    .order-item-btn { display: block; width: 100%; padding: 10px 14px; background: ${v.bg3}; border: 1.5px solid ${v.bdr}; border-radius: 8px; font-family: 'Instrument Sans', sans-serif; font-size: 13px; color: ${v.txt}; cursor: pointer; text-align: left; transition: all .15s; }
+    .order-item-btn:hover:not(.used) { border-color: ${v.bdr2}; background: ${v.bg2}; }
+    .order-item-btn.used { opacity: .3; cursor: default; }
+
+    /* ── ERROR IDENTIFICATION ── */
+    .error-sentence { font-size: 19px; font-weight: 600; line-height: 1.7; color: ${v.txt}; }
+    .error-span { background: none; border: none; border-bottom: 2px solid ${v.bdr2}; padding: 0 2px; font-family: inherit; font-size: inherit; font-weight: inherit; color: ${v.txt}; cursor: pointer; transition: all .15s; border-radius: 2px; }
+    .error-span:hover, .error-span.selected-span { background: ${v.bg3}; border-bottom-color: ${v.txt}; }
+    .error-span.wrong-span { border-bottom-color: #ef4444; color: ${dark ? "#fca5a5" : "#dc2626"}; background: ${dark ? "#2d1b1b" : "#fef2f2"}; }
+    .error-span.correct-span { border-bottom-color: ${v.bdr2}; }
+
     /* ── FLASHCARD ── */
     .fc-scene { width: 100%; max-width: 600px; height: 300px; perspective: 1200px; cursor: pointer; margin: 0 auto 24px; display: block; }
     .fc-card { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform .5s cubic-bezier(.4,.2,.2,1); }
