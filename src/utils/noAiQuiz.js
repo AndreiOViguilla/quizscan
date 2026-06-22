@@ -505,15 +505,28 @@ function makeComparison(sentences, count, allTerms, usedSentences) {
   return out;
 }
 
+// ── POS heuristic — infer likely part-of-speech from context and word shape ───
+function inferPos(word, contextBefore) {
+  const w = word.toLowerCase();
+  if (/(?:ing)$/.test(w) && !/(?:king|ring|sing|wing|thing|spring|string|swing|bring|cling|fling|sling|sting|wring)$/.test(w)) return "verb";
+  if (/(?:ed)$/.test(w) && w.length > 4) return "verb";
+  if (/(?:tion|sion|ness|ment|ity|ism|ist|ance|ence|ship|hood|age|ure|ery|ory|ary)$/.test(w)) return "noun";
+  if (/(?:ful|less|ous|ious|ive|al|ic|ible|able|ent|ant)$/.test(w)) return "adj";
+  if (/(?:ly)$/.test(w) && w.length > 4) return "adv";
+  // Context clues
+  if (/\b(?:the|a|an|this|that|his|her|its|our|their|my|your|every|each|any|some|no)\s+$/i.test(contextBefore)) return "noun";
+  if (/\b(?:to|can|could|will|would|should|may|might|must|shall|did|does|do)\s+$/i.test(contextBefore)) return "verb";
+  return "noun"; // default guess
+}
+
 // ── Vocabulary-in-context questions ──────────────────────────────────────────
 function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSentences) {
   const out = [];
-  // Exclude proper nouns so choices are actual vocabulary words, not names
   const properLower = new Set(allTerms.flatMap(t => t.toLowerCase().split(/\s+/)));
   const vocabTerms = Object.entries(tfidfScores)
-    .filter(([w]) => w.length > 4 && !STOP.has(w) && !properLower.has(w))
+    .filter(([w]) => w.length > 3 && !STOP.has(w) && !properLower.has(w))
     .sort(([, a], [, b]) => b - a)
-    .slice(0, 30)
+    .slice(0, 40)
     .map(([w]) => w);
 
   if (vocabTerms.length < 4) return out;
@@ -528,9 +541,23 @@ function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSentences
     const original = s.substring(startIdx, startIdx + matched.length);
     const kwic = makeKwicBlank(s, original);
     if (!kwic) continue;
-    const distractors = shuffle(vocabTerms.filter(t => t !== matched)).slice(0, 3);
+
+    // Infer POS from context before the blank
+    const contextBefore = kwic.split("___________")[0];
+    const answerPos = inferPos(matched, contextBefore);
+
+    // Prefer distractors of the same POS and similar length (±3 chars) for harder questions
+    const lenMin = matched.length - 3, lenMax = matched.length + 3;
+    const samePosTerms = vocabTerms.filter(t =>
+      t !== matched &&
+      inferPos(t, contextBefore) === answerPos &&
+      t.length >= lenMin && t.length <= lenMax
+    );
+    const fallback = vocabTerms.filter(t => t !== matched && t.length >= lenMin && t.length <= lenMax);
+    const pool = samePosTerms.length >= 3 ? samePosTerms : (fallback.length >= 3 ? fallback : vocabTerms.filter(t => t !== matched));
+    const distractors = shuffle(pool).slice(0, 3);
     if (distractors.length < 3) continue;
-    // Use original case for answer; capitalize distractors to match
+
     const answerDisplay = original.charAt(0).toUpperCase() + original.slice(1);
     const choiceList = [answerDisplay, ...distractors.map(d => d.charAt(0).toUpperCase() + d.slice(1))];
     const choices = shuffle(choiceList);
