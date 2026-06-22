@@ -30,6 +30,8 @@ module.exports = async function handler(req, res) {
 
   const { messages, maxTokens = 8000 } = req.body;
   if (!messages?.length) return res.status(400).json({ error: "Missing messages" });
+  const totalLength = messages.reduce((s, m) => s + (typeof m.content === "string" ? m.content : JSON.stringify(m.content)).length, 0);
+  if (totalLength > 12000) return res.status(400).json({ error: "Content too large" });
 
   const key = process.env.MISTRAL_API_KEY;
   if (!key) return res.status(503).json({ error: "Mistral not configured" });

@@ -218,11 +218,21 @@ export function makeGlobalStyles(dark) {
     .next-btn:hover { background: ${accHover}; }
 
     /* ── TYPE CARD PICKER ── */
-    .type-card { flex: 1; min-width: 72px; max-width: 110px; background: ${v.bg2}; border: 1.5px solid ${v.bdr}; border-radius: 10px; padding: 12px 8px 10px; cursor: pointer; transition: all .15s; text-align: center; color: ${v.txt2}; font-family: 'Instrument Sans', sans-serif; }
+    .type-card { background: ${v.bg2}; border: 1.5px solid ${v.bdr}; border-radius: 10px; padding: 12px 8px 10px; cursor: pointer; transition: all .15s; text-align: center; color: ${v.txt2}; font-family: 'Instrument Sans', sans-serif; }
     .type-card:hover { border-color: ${v.bdr2}; background: ${v.bg3}; color: ${v.txt}; }
     .type-card.active { border-color: ${v.txt}; background: ${v.bg3}; color: ${v.txt}; }
     .type-card-visual { height: 44px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
     .type-card-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+
+    /* ── MODE CARD (Scan Mode / AI Models) ── */
+    .mode-card { background: ${v.bg2}; border: 1.5px solid ${v.bdr}; border-radius: 10px; padding: 14px 12px 12px; cursor: pointer; transition: all .15s; text-align: center; color: ${v.txt2}; font-family: 'Instrument Sans', sans-serif; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .mode-card:hover { border-color: ${v.bdr2}; background: ${v.bg3}; color: ${v.txt}; }
+    .mode-card.active { border-color: ${v.txt}; background: ${v.bg3}; color: ${v.txt}; }
+    .mode-card-icon { opacity: 0.7; display: flex; align-items: center; justify-content: center; }
+    .mode-card.active .mode-card-icon { opacity: 1; }
+    .mode-card-title { font-size: 13px; font-weight: 600; letter-spacing: -0.1px; }
+    .mode-card-desc { font-size: 10px; opacity: 0.5; letter-spacing: 0.1px; }
+    .mode-card.active .mode-card-desc { opacity: 0.6; }
 
     /* ── DOUBLE BLANK ── */
     .df-slot { display: inline-flex; align-items: center; justify-content: center; min-width: 80px; padding: 2px 10px; margin: 0 3px; background: ${v.bg3}; border: 1.5px dashed ${v.bdr2}; border-radius: 6px; font-family: 'Instrument Sans', sans-serif; font-size: 17px; font-weight: 600; color: ${v.txt}; cursor: pointer; transition: all .15s; vertical-align: middle; }

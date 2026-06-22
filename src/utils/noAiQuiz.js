@@ -409,6 +409,31 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
   return out;
 }
 
+async function negateWithDatamuse(sentence) {
+  const wordRe = /\b([a-z]{4,})\b/gi;
+  let m;
+  const candidates = [];
+  while ((m = wordRe.exec(sentence)) !== null) {
+    const w = m[1].toLowerCase();
+    if (STOP.has(w)) continue;
+    const pos = inferPos(w, sentence.slice(0, m.index));
+    if (pos === "adj" || pos === "adv") candidates.push({ word: w, index: m.index, raw: m[1] });
+  }
+  for (const { word, index, raw } of shuffle(candidates).slice(0, 3)) {
+    try {
+      const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
+      const res = await fetch(`/api/datamuse?rel_ant=${encodeURIComponent(word)}&max=3`, { signal });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const ant = (Array.isArray(data) ? data : []).map(d => d.word).find(w => w && !w.includes(" "));
+      if (!ant) continue;
+      const replacement = raw[0] === raw[0].toUpperCase() ? ant.charAt(0).toUpperCase() + ant.slice(1) : ant;
+      return sentence.slice(0, index) + replacement + sentence.slice(index + raw.length);
+    } catch {}
+  }
+  return null;
+}
+
 async function makeTF(sentences, count, allEntities, usedSentences) {
   const out = [];
   const NEGATION = /\b(not|never|no one|nobody|nothing|nowhere|neither|nor|without|lack|absence)\b/i;
@@ -828,6 +853,7 @@ async function fetchEmbeddings(sentences) {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function generateNoAiQuiz(text, numQ, qType) {
+  if (text.length > 50000) text = text.slice(0, 50000);
   const sentences = extractSentences(text);
   const sentencesOrdered = extractSentences(text, { sorted: false });
   if (sentences.length < 5) throw new Error("Not enough content to generate questions. Try adding more text.");
@@ -852,6 +878,8 @@ export async function generateNoAiQuiz(text, numQ, qType) {
   else if (qType === "tf") qs = await makeTF(ranked, numQ, allTerms, usedSentences);
   else if (qType === "mcq") qs = await makeMCQ(ranked, numQ, tfidfScores, allTerms, usedSentences);
   else if (qType === "double_fill") qs = makeDoubleFill(ranked, numQ, tfidfScores, allTerms, usedSentences);
+  else if (qType === "ordering") qs = makeOrdering(sentencesOrdered, numQ, usedSentences);
+  else if (qType === "error_id") qs = await makeErrorId(ranked, numQ, usedSentences);
   else {
     // Mixed: generate from all types, shuffle, take numQ
     const q = Math.ceil(numQ / 3);

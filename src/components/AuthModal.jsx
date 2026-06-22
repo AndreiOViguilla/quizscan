@@ -2,6 +2,19 @@ import { useState, useRef, useEffect } from "react";
 import { signInWithGoogle, signInWithEmail, signUpWithEmail, resetPassword } from "../utils/firebase";
 
 const MAX_ATTEMPTS = 5;
+
+function checkPasswordStrength(pw) {
+  return {
+    length:  pw.length >= 8,
+    upper:   /[A-Z]/.test(pw),
+    lower:   /[a-z]/.test(pw),
+    number:  /[0-9]/.test(pw),
+    special: /[^A-Za-z0-9]/.test(pw),
+  };
+}
+function isStrongPassword(pw) {
+  return Object.values(checkPasswordStrength(pw)).every(Boolean);
+}
 const LOCKOUT_MS = 30 * 60 * 1000;
 const CREDENTIAL_ERRORS = new Set(["auth/user-not-found", "auth/wrong-password", "auth/invalid-credential", "auth/invalid-email"]);
 
@@ -31,7 +44,7 @@ function getAuthError(code = "") {
     case "auth/email-already-in-use":
       return "This email is already registered. Try signing in instead.";
     case "auth/weak-password":
-      return "Password must be at least 6 characters.";
+      return "Password is too weak. Use 8+ characters with uppercase, lowercase, number, and symbol.";
     case "auth/too-many-requests":
       return "Too many attempts. Please try again later.";
     case "auth/network-request-failed":
@@ -120,6 +133,10 @@ export default function AuthModal({ onClose }) {
 
   const handleEmail = async () => {
     setError("");
+    if (tab === "signup" && !isStrongPassword(password)) {
+      setError("Password does not meet the requirements below.");
+      return;
+    }
     if (tab === "signup" && password !== confirm) {
       setError("Passwords do not match.");
       return;
@@ -305,7 +322,35 @@ export default function AuthModal({ onClose }) {
             <input className="field-input" type="password" placeholder="••••••••"
               value={password} onChange={e => setPassword(e.target.value)}
               onKeyDown={e => e.key === "Enter" && tab === "signin" && handleEmail()}
-              style={{ marginBottom: tab === "signup" ? 12 : 20 }} />
+              style={{ marginBottom: 8 }} />
+
+            {tab === "signup" && password && (() => {
+              const c = checkPasswordStrength(password);
+              const score = Object.values(c).filter(Boolean).length;
+              const barColor = score <= 2 ? "#ef4444" : score <= 3 ? "#f97316" : score === 4 ? "#eab308" : "#22c55e";
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ height: 3, borderRadius: 99, background: "var(--bg3)", marginBottom: 8, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${(score / 5) * 100}%`, background: barColor, borderRadius: 99, transition: "all .3s" }} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px" }}>
+                    {[
+                      ["8+ characters", c.length],
+                      ["Uppercase letter", c.upper],
+                      ["Lowercase letter", c.lower],
+                      ["Number (0–9)", c.number],
+                      ["Special character", c.special],
+                    ].map(([label, ok]) => (
+                      <div key={label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: ok ? "#22c55e" : "var(--dim)", transition: "color .2s" }}>
+                        <span style={{ fontWeight: 700, fontSize: 10 }}>{ok ? "✓" : "○"}</span>
+                        <span>{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+            {tab !== "signup" && <div style={{ marginBottom: 20 }} />}
 
             {tab === "signup" && (
               <>

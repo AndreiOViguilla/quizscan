@@ -800,7 +800,7 @@ export default function HomePage() {
           {mode !== "study" && (
             <div style={{ marginBottom: 20 }}>
               <label className="field-label" style={{ marginBottom: 8, display: "block" }}>Type</label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: 8 }}>
                 {[
                   {
                     value: "mixed", label: "Mixed",
@@ -866,6 +866,30 @@ export default function HomePage() {
                       </div>
                     )
                   },
+                  {
+                    value: "ordering", label: "Order",
+                    visual: (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        {[[1,18],[2,13],[3,20]].map(([n, w]) => (
+                          <div key={n} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span style={{ fontSize: 7, fontWeight: 700, opacity: 0.5, width: 7, flexShrink: 0 }}>{n}</span>
+                            <span style={{ height: 2, width: w, background: "currentColor", opacity: 0.45, borderRadius: 1, display: "block" }} />
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  },
+                  {
+                    value: "error_id", label: "Find Error",
+                    visual: (
+                      <div style={{ fontSize: 8, opacity: 0.75, textAlign: "center", lineHeight: 2 }}>
+                        <span>The </span>
+                        <span style={{ borderBottom: "1.5px solid currentColor", opacity: 0.9 }}>cat</span>
+                        <span> is </span>
+                        <span style={{ borderBottom: "1.5px solid currentColor", opacity: 0.35 }}>huge</span>
+                      </div>
+                    )
+                  },
                 ].map(({ value, label, visual }) => (
                   <button key={value} className={`type-card${qType === value ? " active" : ""}`} onClick={() => setQType(value)}>
                     <div className="type-card-visual">{visual}</div>
@@ -883,8 +907,28 @@ export default function HomePage() {
                 <Toggle on={useStreak} onChange={setUseStreak} label="Streak" />
                 <Toggle on={useSounds} onChange={setUseSounds} label="Sounds" />
               </div>
-              <div style={{ borderTop: "1px solid var(--bdr)", paddingTop: 10 }}>
-                <Toggle on={noAi} onChange={setNoAi} label="No AI (scan only)" />
+              <div style={{ borderTop: "1px solid var(--bdr)", paddingTop: 14, marginTop: 4 }}>
+                <label className="field-label" style={{ marginBottom: 8, display: "block" }}>Generation Mode</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <button className={`mode-card${noAi ? " active" : ""}`} onClick={() => setNoAi(true)}>
+                    <div className="mode-card-icon">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
+                      </svg>
+                    </div>
+                    <div className="mode-card-title">Scan Mode</div>
+                    <div className="mode-card-desc">Instant · No LLM · Token-free</div>
+                  </button>
+                  <button className={`mode-card${!noAi ? " active" : ""}`} onClick={() => setNoAi(false)}>
+                    <div className="mode-card-icon">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3l1.5 4.5H18l-3.75 2.75 1.5 4.5L12 12l-3.75 2.75 1.5-4.5L6 7.5h4.5z"/>
+                      </svg>
+                    </div>
+                    <div className="mode-card-title">AI Models</div>
+                    <div className="mode-card-desc">Smarter · More variety</div>
+                  </button>
+                </div>
               </div>
             </div>
           )}
