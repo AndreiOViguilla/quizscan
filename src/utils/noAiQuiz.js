@@ -8,7 +8,11 @@ function cleanText(raw) {
   return raw
     .replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n")
     .replace(/[""]/g, '"').replace(/['']/g, "'")
-    .replace(/\s+/g, " ").trim();
+    // Normalize dashes so "1937–1945" stays readable and doesn't merge into "19371945"
+    .replace(/[–—]/g, " - ")
+    // Strip Wikipedia-style citation brackets [1], [12][13], [note 1]
+    .replace(/\[[\w\s,;:]+\]/g, "")
+    .replace(/\s{2,}/g, " ").trim();
 }
 
 // ── Coreference Resolution ────────────────────────────────────────────────────
@@ -75,15 +79,22 @@ function scoreSentence(s, idx, total) {
 
 function extractSentences(text) {
   const HAS_VERB = /\b(is|are|was|were|had|has|did|do|does|said|told|made|went|came|felt|looked|asked|moved|played|built|wrote|found|knew|wanted|liked|began|started|ended|called|named|liked|showed|gave|took|kept|left|put|got|set|ran|saw|thought|brought|bought|tried|heard|felt|stood|fell|held|grew|sent|met|led|read|lost|spent|born|raised|died|lived)\b/i;
+  const MONTHS = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/;
   const raw = cleanText(text)
     .split(/(?<=[.!?])\s+(?=[A-Z"(])/)
     .map(s => s.trim())
     .filter(s => {
       if (s.length <= 35 || s.split(" ").length < 6) return false;
+      // Reject sentences that are too long to make clean questions
+      if (s.length > 350) return false;
       // Reject navigation/list-like text: >50% capitalized words and no verb
       const words = s.split(/\s+/);
       const capRatio = words.filter(w => /^[A-Z]/.test(w)).length / words.length;
       if (capRatio > 0.5 && !HAS_VERB.test(s)) return false;
+      // Reject bibliography/reference entries (author, p. N or pp. N-N patterns)
+      if (/\b(pp?\.|ed\.|vol\.|ibid\.|et al\.|doi:|isbn:)/i.test(s)) return false;
+      // Reject sentences with 3+ citation-style numbers still remaining
+      if ((s.match(/\[\d/g) || []).length >= 3) return false;
       return true;
     });
   const resolved = resolveCoref(raw);
@@ -245,7 +256,7 @@ function toWhQuestion(sentence) {
     const q = sentence.replace(placeMatch[0], `where`).replace(/[.!?]+$/, "");
     return { question: q.charAt(0).toUpperCase() + q.slice(1) + "?", answer: placeMatch[1], type: "place" };
   }
-  const numMatch = sentence.match(/\b(\d[\d,]*)\s+(?!percent|%)/);
+  const numMatch = sentence.match(/\b(\d[\d,]*)\s+(?!percent|%|January|February|March|April|May|June|July|August|September|October|November|December)/);
   if (numMatch) {
     const q = sentence.replace(numMatch[1], "how many").replace(/[.!?]+$/, "");
     return { question: q.charAt(0).toUpperCase() + q.slice(1) + "?", answer: numMatch[1], type: "number" };
@@ -309,6 +320,10 @@ function trimAnswer(text, maxLen = 80) {
   return text.slice(0, maxLen).replace(/\s+\S*$/, "") + "…";
 }
 
+function questionOk(q) {
+  return typeof q === "string" && q.length >= 10 && q.length <= 250;
+}
+
 // ── Shuffle ───────────────────────────────────────────────────────────────────
 function shuffle(arr) {
   const a = [...arr];
@@ -341,7 +356,7 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
     const wh = toWhQuestion(s);
-    if (wh) {
+    if (wh && questionOk(wh.question)) {
       usedSentences.add(s);
       out.push({ type: "fill", question: wh.question, answer: wh.answer, explanation: `From source: "${s}"` });
       continue;
@@ -350,8 +365,10 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
     if (!term) continue;
     const kwic = makeKwicBlank(s, term);
     if (!kwic) continue;
+    const q = `Fill in the blank: "${kwic}"`;
+    if (!questionOk(q)) continue;
     usedSentences.add(s);
-    out.push({ type: "fill", question: `Fill in the blank: "${kwic}"`, answer: term, explanation: `From source: "${s}"` });
+    out.push({ type: "fill", question: q, answer: term, explanation: `From source: "${s}"` });
   }
   return out;
 }
@@ -361,12 +378,14 @@ function makeTF(sentences, count, allEntities, usedSentences) {
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
+    const q = s.replace(/[.!?]+$/, "");
+    if (!questionOk(q)) continue;
     if (Math.random() > 0.4) {
       usedSentences.add(s);
-      out.push({ type: "tf", question: s.replace(/[.!?]+$/, ""), answer: "True", explanation: "This statement appears directly in the source." });
+      out.push({ type: "tf", question: q, answer: "True", explanation: "This statement appears directly in the source." });
     } else {
       const neg = negateSentence(s, allEntities);
-      if (neg) {
+      if (neg && questionOk(neg)) {
         usedSentences.add(s);
         out.push({ type: "tf", question: neg.replace(/[.!?]+$/, ""), answer: "False", explanation: `Correct: "${s}"` });
       }
@@ -384,17 +403,18 @@ function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
 
     const def = extractDefinition(s);
     if (def) {
+      const defQ = `What is described as "${def.definition}"?`;
       const defDistractors = allTerms.filter(t => t !== def.subject && t.split(" ").length <= 3);
-      if (defDistractors.length >= 3) {
+      if (questionOk(defQ) && defDistractors.length >= 3) {
         const choices = shuffle([def.subject, ...shuffle(defDistractors).slice(0, 3)]);
         usedSentences.add(s);
-        out.push({ type: "mcq", question: `What is described as "${def.definition}"?`, choices, answer: choices.indexOf(def.subject), explanation: `From source: "${s}"` });
+        out.push({ type: "mcq", question: defQ, choices, answer: choices.indexOf(def.subject), explanation: `From source: "${s}"` });
         continue;
       }
     }
 
     const wh = toWhQuestion(s);
-    if (wh) {
+    if (wh && questionOk(wh.question)) {
       const distractors = getDistractors(wh.answer, allTerms, wh.type, sTerms);
       if (distractors.length < 3) continue;
       const choices = shuffle([wh.answer, ...distractors.slice(0, 3)]);
@@ -407,12 +427,14 @@ function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
     if (!answer) continue;
     const kwic = makeKwicBlank(s, answer);
     if (!kwic) continue;
+    const kwicQ = `Choose the correct answer: "${kwic}"`;
+    if (!questionOk(kwicQ)) continue;
     const type = detectEntityType(answer);
     const distractors = getDistractors(answer, allTerms, type, sTerms);
     if (distractors.length < 3) continue;
     const choices = shuffle([answer, ...distractors.slice(0, 3)]);
     usedSentences.add(s);
-    out.push({ type: "mcq", question: `Choose the correct answer: "${kwic}"`, choices, answer: choices.indexOf(answer), explanation: `From source: "${s}"` });
+    out.push({ type: "mcq", question: kwicQ, choices, answer: choices.indexOf(answer), explanation: `From source: "${s}"` });
   }
   return out;
 }
@@ -424,8 +446,7 @@ function makeCauseEffect(sentences, count, usedSentences) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
     const ce = extractCauseEffect(s);
-    if (!ce) continue;
-    if (ce.answer.length < 5) continue;
+    if (!ce || !questionOk(ce.question) || ce.answer.length < 5) continue;
     usedSentences.add(s);
     out.push({ type: "fill", question: ce.question, answer: trimAnswer(ce.answer), explanation: `From source: "${s}"` });
   }
@@ -439,8 +460,7 @@ function makeSequence(sentences, count, usedSentences) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
     const seq = extractSequence(s);
-    if (!seq) continue;
-    if (seq.answer.length < 5) continue;
+    if (!seq || !questionOk(seq.question) || seq.answer.length < 5) continue;
     usedSentences.add(s);
     out.push({ type: "fill", question: seq.question, answer: trimAnswer(seq.answer), explanation: `From source: "${s}"` });
   }
