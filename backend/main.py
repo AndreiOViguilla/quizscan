@@ -27,7 +27,7 @@ class TranslateRequest(BaseModel):
     source: str = "en"
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"status": "ok"}
 
