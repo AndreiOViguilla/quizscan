@@ -31,6 +31,7 @@ export default function QuizPage() {
   const [showTabWarning, setShowTabWarning] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [dfSlots, setDfSlots] = useState([null, null]);
   const [syncCurrentQ, setSyncCurrentQ] = useState(null);
 
   // Speedrun: track elapsed seconds
@@ -171,13 +172,20 @@ export default function QuizPage() {
 
   const navigateToQuestion = (i) => {
     const prev = answers[i];
+    const q = questions[i];
     setCurrent(i);
     if (prev !== undefined) {
       setSelected(prev.userAnswer);
       setFillVal(typeof prev.userAnswer === "string" ? prev.userAnswer : "");
       setRevealed(prev.revealed ?? true);
+      if (q?.type === "double_fill" && typeof prev.userAnswer === "string") {
+        const parts = prev.userAnswer.split(" / ");
+        setDfSlots(parts.length === 2 ? parts : [null, null]);
+      } else {
+        setDfSlots([null, null]);
+      }
     } else {
-      setSelected(null); setFillVal(""); setRevealed(false);
+      setSelected(null); setFillVal(""); setRevealed(false); setDfSlots([null, null]);
     }
     setHintUsed(false); setHintText(""); setEliminated([]);
   };
@@ -241,13 +249,18 @@ export default function QuizPage() {
   const submitAnswer = (force = null) => {
     if (revealed) return;
     const q = questions[current];
-    let ua = force !== null ? force : (q.type === "fill" ? fillVal.trim() : selected);
-    if (ua === null || ua === "") return;
-    clearInterval(timerRef.current);
-    let correct = false;
-    if (q.type === "mcq") correct = ua === q.answer;
-    else if (q.type === "tf") correct = ua.toLowerCase() === String(q.answer).toLowerCase();
-    else correct = fillMatches(ua, String(q.answer));
+    let ua, correct;
+    if (q.type === "double_fill") {
+      if (dfSlots.includes(null)) return;
+      ua = dfSlots.join(" / ");
+      correct = dfSlots.every((s, i) => s?.toLowerCase() === (q.answers?.[i] || "").toLowerCase());
+    } else {
+      ua = force !== null ? force : (q.type === "fill" ? fillVal.trim() : selected);
+      if (ua === null || ua === "") return;
+      if (q.type === "mcq") correct = ua === q.answer;
+      else if (q.type === "tf") correct = ua.toLowerCase() === String(q.answer).toLowerCase();
+      else correct = fillMatches(ua, String(q.answer));
+    }
     if (useSounds) playSound(correct ? "correct" : "wrong");
     const ns = correct ? streak + 1 : 0;
     setStreak(ns); setBestStreak(b => Math.max(b, ns));
@@ -457,7 +470,7 @@ export default function QuizPage() {
 
       <div className="card">
         <div className="q-type-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>{q.type === "mcq" ? "* Multiple Choice" : q.type === "tf" ? "* True / False" : "* Fill in the Blank"}</span>
+          <span>{q.type === "mcq" ? "* Multiple Choice" : q.type === "tf" ? "* True / False" : q.type === "double_fill" ? "* Double Blank" : "* Fill in the Blank"}</span>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             {useTimer && gameMode !== "speedrun" && (
               <span style={{ color: timerColor, fontWeight: 600 }}>{timeLeft}s</span>
@@ -470,7 +483,45 @@ export default function QuizPage() {
           </div>
         </div>
 
-        <div className="question-text">{q.question}</div>
+        <div className="question-text">
+          {q.type === "double_fill"
+            ? q.question.split("___").map((part, i, arr) => (
+                <span key={i}>
+                  {part}
+                  {i < arr.length - 1 && (
+                    <button
+                      className={`df-slot${dfSlots[i] ? " filled" : ""}${revealed ? (dfSlots[i]?.toLowerCase() === (q.answers?.[i] || "").toLowerCase() ? " correct" : " wrong") : ""}`}
+                      onClick={() => {
+                        if (revealed || !dfSlots[i]) return;
+                        const next = [...dfSlots]; next[i] = null; setDfSlots(next);
+                      }}
+                    >
+                      {dfSlots[i] || "___"}
+                    </button>
+                  )}
+                </span>
+              ))
+            : q.question}
+        </div>
+
+        {q.type === "double_fill" && !revealed && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 18 }}>
+            {(q.choices || []).map((c, i) => {
+              const placed = dfSlots.includes(c);
+              return (
+                <button key={i} className={`df-word-btn${placed ? " used" : ""}`}
+                  disabled={placed}
+                  onClick={() => {
+                    if (placed) return;
+                    const emptyIdx = dfSlots.indexOf(null);
+                    if (emptyIdx !== -1) { const next = [...dfSlots]; next[emptyIdx] = c; setDfSlots(next); }
+                  }}>
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {q.type === "mcq" && (
           <div className="choices">
@@ -525,7 +576,7 @@ export default function QuizPage() {
         {revealed && (
           <>
             <div className={`feedback ${answers[current]?.correct ? "correct-fb" : "wrong-fb"}`}>
-              {answers[current]?.correct ? "+ Correct! " : `- Wrong. Answer: ${q.type === "mcq" ? q.choices?.[q.answer] : q.answer}. `}
+              {answers[current]?.correct ? "+ Correct! " : `- Wrong. Answer: ${q.type === "mcq" ? q.choices?.[q.answer] : q.type === "double_fill" ? (q.answers || []).join(" / ") : q.answer}. `}
               {q.explanation}
             </div>
             <div className="diff-row">
@@ -553,6 +604,9 @@ export default function QuizPage() {
           )}
           {!revealed && q.type === "mcq" && (
             <button className="next-btn" onClick={() => submitAnswer()} disabled={selected === null}>Check →</button>
+          )}
+          {!revealed && q.type === "double_fill" && (
+            <button className="next-btn" onClick={() => submitAnswer()} disabled={dfSlots.includes(null)}>Check →</button>
           )}
           {revealed && isGuestSync && (
             <div style={{ fontSize: 12, opacity: 0.45, padding: "8px 12px", fontStyle: "italic" }}>

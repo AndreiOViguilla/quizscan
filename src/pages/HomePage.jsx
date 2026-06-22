@@ -364,7 +364,7 @@ export default function HomePage() {
         }
         if (!sourceText || sourceText.length < 100) throw new Error("Not enough content found to generate questions.");
         setGenStatus("Generating questions...");
-        const qs = generateNoAiQuiz(sourceText, numQ, qType);
+        const qs = await generateNoAiQuiz(sourceText, numQ, qType);
         if (!qs.length) throw new Error("Could not extract enough questions. Try a different source.");
         await startQuiz(qs);
       } catch (e) {
@@ -379,12 +379,13 @@ export default function HomePage() {
     const slowTimer = setTimeout(() => setGenStatus("Still working, almost there..."), 22000);
 
     try {
-      const typeInstr = qType === "mixed" ? "Mix of mcq(4 options), tf, and fill."
+      const typeInstr = qType === "mixed" ? "Mix of mcq(4 options), tf, fill, and double_fill(sentence with 2 blanks)."
         : qType === "mcq" ? "Only mcq with 4 options."
         : qType === "tf" ? "Only true/false."
+        : qType === "double_fill" ? "Only double_fill questions: sentence with exactly 2 blanks (___), choices is 4 words, answers is [word_for_blank1, word_for_blank2]."
         : "Only fill-in-the-blank.";
       const langNote = lang !== "English" ? `Language: ${lang}.` : "";
-      const jsonInstr = `Output ONLY a JSON array. No markdown.\n[{"type":"mcq"|"tf"|"fill","question":"...","choices":["A","B","C","D"],"answer":0-3|"True"|"False"|"string","explanation":"..."}]`;
+      const jsonInstr = `Output ONLY a JSON array. No markdown.\n[{"type":"mcq"|"tf"|"fill"|"double_fill","question":"...","choices":["A","B","C","D"],"answer":0-3|"True"|"False"|"string","answers":["word1","word2"],"explanation":"..."}]\nFor double_fill: question must contain exactly 2 blanks marked as ___, choices is 4 words (the 2 answers + 2 plausible wrong words), answers is [word_for_blank1,word_for_blank2].`;
       const maxOut = Math.min(Math.max(numQ * 130 + 300, 1000), 8000);
       const systemMsg = {
         role: "system",
@@ -776,24 +777,13 @@ export default function HomePage() {
           <button className="back-btn" onClick={() => setShowSettings(false)}>← Back</button>
           <div className="page-heading">Settings</div>
 
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
             <div>
               <label className="field-label">Questions</label>
               <select className="field-select" value={numQ} onChange={e => setNumQ(Number(e.target.value))}>
                 {[5, 10, 15, 20, 25, 30, 40, 50].map(n => <option key={n} value={n}>{n}</option>)}
               </select>
             </div>
-            {mode !== "study" && (
-              <div>
-                <label className="field-label">Type</label>
-                <select className="field-select" value={qType} onChange={e => setQType(e.target.value)}>
-                  <option value="mixed">Mixed</option>
-                  <option value="mcq">Multiple Choice</option>
-                  <option value="tf">True / False</option>
-                  <option value="fill">Fill in Blank</option>
-                </select>
-              </div>
-            )}
             <div>
               <label className="field-label">Language</label>
               <select className="field-select" value={lang} onChange={e => setLang(e.target.value)}>
@@ -806,6 +796,85 @@ export default function HomePage() {
                 value={playerName} onChange={e => setPlayerName(e.target.value)} />
             </div>
           </div>
+
+          {mode !== "study" && (
+            <div style={{ marginBottom: 20 }}>
+              <label className="field-label" style={{ marginBottom: 8, display: "block" }}>Type</label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[
+                  {
+                    value: "mixed", label: "Mixed",
+                    visual: (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", opacity: 0.8, flexShrink: 0 }} />
+                          <span style={{ height: 2, width: 16, background: "currentColor", opacity: 0.45, borderRadius: 1, display: "block" }} />
+                        </div>
+                        <div style={{ display: "flex", gap: 3, fontSize: 8, fontWeight: 700 }}>
+                          <span style={{ border: "1px solid currentColor", borderRadius: 3, padding: "0 3px", opacity: 0.7 }}>T</span>
+                          <span style={{ border: "1px solid currentColor", borderRadius: 3, padding: "0 3px", opacity: 0.3 }}>F</span>
+                        </div>
+                        <div style={{ borderBottom: "1.5px solid currentColor", width: 22, opacity: 0.45 }} />
+                      </div>
+                    )
+                  },
+                  {
+                    value: "mcq", label: "Choice",
+                    visual: (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        {["A","B","C","D"].map((l, i) => (
+                          <div key={l} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                            <span style={{ width: 7, height: 7, border: "1px solid currentColor", borderRadius: "50%", opacity: i === 0 ? 1 : 0.3, background: i === 0 ? "currentColor" : "transparent", flexShrink: 0 }} />
+                            <span style={{ height: 2, width: i === 0 ? 20 : [14,17,12][i-1], background: "currentColor", opacity: i === 0 ? 0.65 : 0.2, borderRadius: 1, display: "block" }} />
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  },
+                  {
+                    value: "tf", label: "True/False",
+                    visual: (
+                      <div style={{ display: "flex", gap: 5 }}>
+                        {[["T", 0.85], ["F", 0.3]].map(([v, op]) => (
+                          <div key={v} style={{ width: 24, height: 24, border: "1.5px solid currentColor", borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, opacity: op }}>
+                            {v}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  },
+                  {
+                    value: "fill", label: "Fill Blank",
+                    visual: (
+                      <div style={{ fontSize: 9, opacity: 0.75, textAlign: "center", lineHeight: 1.7 }}>
+                        <div>The</div>
+                        <div style={{ borderBottom: "1.5px solid currentColor", width: 30, margin: "1px auto" }} />
+                        <div>is big.</div>
+                      </div>
+                    )
+                  },
+                  {
+                    value: "double_fill", label: "2 Blanks",
+                    visual: (
+                      <div style={{ fontSize: 9, opacity: 0.75, textAlign: "center", lineHeight: 1.7 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "center" }}>
+                          <div style={{ borderBottom: "1.5px solid currentColor", width: 22 }} />
+                          <span style={{ opacity: 0.4, fontSize: 8 }}>&</span>
+                          <div style={{ borderBottom: "1.5px solid currentColor", width: 22 }} />
+                        </div>
+                        <div style={{ opacity: 0.4, marginTop: 4 }}>2 blanks</div>
+                      </div>
+                    )
+                  },
+                ].map(({ value, label, visual }) => (
+                  <button key={value} className={`type-card${qType === value ? " active" : ""}`} onClick={() => setQType(value)}>
+                    <div className="type-card-visual">{visual}</div>
+                    <div className="type-card-label">{label}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {mode === "quiz" && (
             <div className="toggles-row" style={{ marginBottom: 12 }}>

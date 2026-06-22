@@ -518,43 +518,141 @@ function inferPos(word, contextBefore) {
   return "noun"; // default guess
 }
 
-// ── Vocabulary-in-context questions ──────────────────────────────────────────
-function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSentences) {
+// ── Double-blank questions ────────────────────────────────────────────────────
+function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) {
   const out = [];
   const properLower = new Set(allTerms.flatMap(t => t.toLowerCase().split(/\s+/)));
-  const vocabTerms = Object.entries(tfidfScores)
-    .filter(([w]) => w.length > 3 && !STOP.has(w) && !properLower.has(w))
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 40)
-    .map(([w]) => w);
 
-  if (vocabTerms.length < 4) return out;
+  const wordFreq = {};
+  sentences.forEach(s => {
+    (s.toLowerCase().match(/\b[a-z]{4,}\b/g) || [])
+      .filter(w => !STOP.has(w) && !properLower.has(w))
+      .forEach(w => { wordFreq[w] = (wordFreq[w] || 0) + 1; });
+  });
+  const fullTerms = Object.keys(wordFreq)
+    .map(w => ({ w, score: tfidfScores[w] || tfidfScores[w.replace(/(?:ers?|ing|ed|ly|ness|tion)$/, "")] || 0 }))
+    .sort((a, b) => b.score - a.score)
+    .map(({ w }) => w);
 
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
     const sLower = s.toLowerCase();
-    const matched = vocabTerms.find(w => sLower.includes(w));
+
+    // Find 2 high-scoring whole-word terms in this sentence
+    const found = [];
+    for (const term of fullTerms) {
+      if (found.length >= 2) break;
+      const idx = sLower.indexOf(term);
+      if (idx === -1) continue;
+      const bc = idx > 0 ? sLower[idx - 1] : " ";
+      const ac = idx + term.length < sLower.length ? sLower[idx + term.length] : " ";
+      if (/[a-z]/.test(bc) || /[a-z]/.test(ac)) continue;
+      if (found.some(f => f.term === term)) continue;
+      found.push({ term, idx });
+    }
+    if (found.length < 2) continue;
+
+    // Sort by position so blank order matches sentence order
+    found.sort((a, b) => a.idx - b.idx);
+
+    // Replace terms right-to-left so earlier indices stay valid
+    let question = s;
+    for (let i = found.length - 1; i >= 0; i--) {
+      const { idx, term } = found[i];
+      question = question.substring(0, idx) + "___" + question.substring(idx + term.length);
+    }
+
+    const answers = found.map(f => f.term); // lowercase for consistent comparison
+    const distractors = shuffle(fullTerms.filter(t => !answers.includes(t) && t.length > 3)).slice(0, 2);
+    if (distractors.length < 2) continue;
+
+    // Capitalize first letter for display; original sentence case preserved via comparison being case-insensitive
+    const capitalize = w => w.charAt(0).toUpperCase() + w.slice(1);
+    const choices = shuffle([...answers, ...distractors].map(capitalize));
+
+    usedSentences.add(s);
+    out.push({ type: "double_fill", question, answers, choices, explanation: `From source: "${s}"` });
+  }
+  return out;
+}
+
+// ── Datamuse: antonyms + associated words, always mixed with text pool ────────
+async function fetchDatamuseDistractors(word, textPool) {
+  const lenMin = word.length - 3, lenMax = word.length + 5;
+  let apiWords = [];
+  try {
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
+    const [antRes, trgRes] = await Promise.all([
+      fetch(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(word)}&max=10`, { signal }),
+      fetch(`https://api.datamuse.com/words?rel_trg=${encodeURIComponent(word)}&max=15`, { signal }),
+    ]);
+    const [antData, trgData] = await Promise.all([
+      antRes.ok ? antRes.json() : Promise.resolve([]),
+      trgRes.ok ? trgRes.json() : Promise.resolve([]),
+    ]);
+    apiWords = [...antData, ...trgData]
+      .map(d => (d.word || "").toLowerCase())
+      .filter(w => w && w !== word && !w.includes(" ") && w.length >= lenMin && w.length <= lenMax);
+  } catch {}
+
+  // Always combine API results with same-length text-pool words
+  const textWords = textPool.filter(t => t !== word && t.length >= lenMin && t.length <= lenMax);
+  const combined = [...new Set([...apiWords, ...textWords])];
+  if (combined.length >= 3) return shuffle(combined).slice(0, 3);
+
+  // Last resort: any text-pool word
+  const any = textPool.filter(t => t !== word);
+  return shuffle(any).slice(0, 3);
+}
+
+// ── Vocabulary-in-context questions ──────────────────────────────────────────
+async function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSentences) {
+  const out = [];
+  const properLower = new Set(allTerms.flatMap(t => t.toLowerCase().split(/\s+/)));
+
+  // Build pool of FULL words (not TF-IDF stems) from the text
+  const wordFreq = {};
+  sentences.forEach(s => {
+    (s.toLowerCase().match(/\b[a-z]{4,}\b/g) || [])
+      .filter(w => !STOP.has(w) && !properLower.has(w))
+      .forEach(w => { wordFreq[w] = (wordFreq[w] || 0) + 1; });
+  });
+  // Score full words using their TF-IDF score (or their stem's score as fallback)
+  const fullVocabTerms = Object.keys(wordFreq)
+    .map(w => ({ w, score: tfidfScores[w] || tfidfScores[w.replace(/(?:ers?|ing|ed|ly|ness|tion)$/, "")] || 0 }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 50)
+    .map(({ w }) => w);
+
+  if (fullVocabTerms.length < 4) return out;
+
+  for (const s of shuffle(sentences)) {
+    if (out.length >= count) break;
+    if (usedSentences.has(s)) continue;
+    const sLower = s.toLowerCase();
+
+    // Find a vocab term that appears as a WHOLE WORD (not a substring of a longer word)
+    let matched = null;
+    let startIdx = -1;
+    for (const term of fullVocabTerms) {
+      const idx = sLower.indexOf(term);
+      if (idx === -1) continue;
+      const beforeChar = idx > 0 ? sLower[idx - 1] : " ";
+      const afterChar = idx + term.length < sLower.length ? sLower[idx + term.length] : " ";
+      if (/[a-z]/.test(beforeChar) || /[a-z]/.test(afterChar)) continue;
+      matched = term;
+      startIdx = idx;
+      break;
+    }
     if (!matched) continue;
-    const startIdx = sLower.indexOf(matched);
+
     const original = s.substring(startIdx, startIdx + matched.length);
     const kwic = makeKwicBlank(s, original);
     if (!kwic) continue;
 
-    // Infer POS from context before the blank
-    const contextBefore = kwic.split("___________")[0];
-    const answerPos = inferPos(matched, contextBefore);
-
-    // Prefer distractors of the same POS and similar length (±3 chars) for harder questions
-    const lenMin = matched.length - 3, lenMax = matched.length + 3;
-    const samePosTerms = vocabTerms.filter(t =>
-      t !== matched &&
-      inferPos(t, contextBefore) === answerPos &&
-      t.length >= lenMin && t.length <= lenMax
-    );
-    const fallback = vocabTerms.filter(t => t !== matched && t.length >= lenMin && t.length <= lenMax);
-    const pool = samePosTerms.length >= 3 ? samePosTerms : (fallback.length >= 3 ? fallback : vocabTerms.filter(t => t !== matched));
-    const distractors = shuffle(pool).slice(0, 3);
+    // Fetch semantically related words + antonyms from Datamuse; fall back to text pool
+    const distractors = await fetchDatamuseDistractors(matched, fullVocabTerms);
     if (distractors.length < 3) continue;
 
     const answerDisplay = original.charAt(0).toUpperCase() + original.slice(1);
@@ -567,7 +665,7 @@ function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSentences
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export function generateNoAiQuiz(text, numQ, qType) {
+export async function generateNoAiQuiz(text, numQ, qType) {
   const sentences = extractSentences(text);
   if (sentences.length < 5) throw new Error("Not enough content to generate questions. Try adding more text.");
 
@@ -579,9 +677,11 @@ export function generateNoAiQuiz(text, numQ, qType) {
   if (qType === "fill") qs = makeFill(sentences, numQ, tfidfScores, usedSentences);
   else if (qType === "tf") qs = makeTF(sentences, numQ, allTerms, usedSentences);
   else if (qType === "mcq") qs = makeMCQ(sentences, numQ, tfidfScores, allTerms, usedSentences);
+  else if (qType === "double_fill") qs = makeDoubleFill(sentences, numQ, tfidfScores, allTerms, usedSentences);
   else {
     // Mixed: generate from all types, shuffle, take numQ
     const q = Math.ceil(numQ / 3);
+    const vocabQs = await makeVocabContext(sentences, q, tfidfScores, allTerms, usedSentences);
     const pool = shuffle([
       ...makeMCQ(sentences, q, tfidfScores, allTerms, usedSentences),
       ...makeTF(sentences, q, allTerms, usedSentences),
@@ -589,7 +689,8 @@ export function generateNoAiQuiz(text, numQ, qType) {
       ...makeCauseEffect(sentences, q, usedSentences),
       ...makeSequence(sentences, q, usedSentences),
       ...makeComparison(sentences, q, allTerms, usedSentences),
-      ...makeVocabContext(sentences, q, tfidfScores, allTerms, usedSentences),
+      ...makeDoubleFill(sentences, q, tfidfScores, allTerms, usedSentences),
+      ...vocabQs,
     ]);
     qs = pool.slice(0, numQ);
   }

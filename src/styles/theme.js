@@ -215,6 +215,23 @@ export function makeGlobalStyles(dark) {
     .next-btn { background: ${acc}; color: ${dark ? "#212121" : "#ffffff"}; border: none; padding: 11px 28px; font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 8px; transition: all .15s; }
     .next-btn:hover { background: ${accHover}; }
 
+    /* ── TYPE CARD PICKER ── */
+    .type-card { flex: 1; min-width: 72px; max-width: 110px; background: ${v.bg2}; border: 1.5px solid ${v.bdr}; border-radius: 10px; padding: 12px 8px 10px; cursor: pointer; transition: all .15s; text-align: center; color: ${v.txt2}; font-family: 'Instrument Sans', sans-serif; }
+    .type-card:hover { border-color: ${v.bdr2}; background: ${v.bg3}; color: ${v.txt}; }
+    .type-card.active { border-color: ${v.txt}; background: ${v.bg3}; color: ${v.txt}; }
+    .type-card-visual { height: 44px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
+    .type-card-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+
+    /* ── DOUBLE BLANK ── */
+    .df-slot { display: inline-flex; align-items: center; justify-content: center; min-width: 80px; padding: 2px 10px; margin: 0 3px; background: ${v.bg3}; border: 1.5px dashed ${v.bdr2}; border-radius: 6px; font-family: 'Instrument Sans', sans-serif; font-size: 17px; font-weight: 600; color: ${v.txt}; cursor: pointer; transition: all .15s; vertical-align: middle; }
+    .df-slot.filled { border-style: solid; border-color: ${v.bdr2}; background: ${v.bg2}; cursor: pointer; }
+    .df-slot.filled:hover { border-color: ${v.txt2}; }
+    .df-slot.correct { border-color: ${v.bdr2}; background: ${v.bg3}; }
+    .df-slot.wrong { border-color: #ef4444; background: ${dark ? "#2d1b1b" : "#fef2f2"}; color: ${dark ? "#fca5a5" : "#dc2626"}; }
+    .df-word-btn { padding: 8px 18px; background: ${v.bg3}; border: 1.5px solid ${v.bdr}; border-radius: 8px; font-family: 'Instrument Sans', sans-serif; font-size: 14px; font-weight: 600; color: ${v.txt}; cursor: pointer; transition: all .15s; }
+    .df-word-btn:hover:not(.used) { border-color: ${v.bdr2}; background: ${v.bg2}; }
+    .df-word-btn.used { opacity: .3; cursor: default; }
+
     /* ── FLASHCARD ── */
     .fc-scene { width: 100%; max-width: 600px; height: 300px; perspective: 1200px; cursor: pointer; margin: 0 auto 24px; display: block; }
     .fc-card { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform .5s cubic-bezier(.4,.2,.2,1); }
