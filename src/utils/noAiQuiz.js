@@ -466,13 +466,17 @@ function makeComparison(sentences, count, allTerms, usedSentences) {
 }
 
 // ── Vocabulary-in-context questions ──────────────────────────────────────────
-function makeVocabContext(sentences, count, tfidfScores, usedSentences) {
+function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSentences) {
   const out = [];
+  // Exclude proper nouns so choices are actual vocabulary words, not names
+  const properLower = new Set(allTerms.flatMap(t => t.toLowerCase().split(/\s+/)));
   const vocabTerms = Object.entries(tfidfScores)
-    .filter(([w]) => w.length > 4 && !STOP.has(w))
+    .filter(([w]) => w.length > 4 && !STOP.has(w) && !properLower.has(w))
     .sort(([, a], [, b]) => b - a)
     .slice(0, 30)
     .map(([w]) => w);
+
+  if (vocabTerms.length < 4) return out;
 
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
@@ -486,9 +490,12 @@ function makeVocabContext(sentences, count, tfidfScores, usedSentences) {
     if (!kwic) continue;
     const distractors = shuffle(vocabTerms.filter(t => t !== matched)).slice(0, 3);
     if (distractors.length < 3) continue;
-    const choices = shuffle([matched, ...distractors]);
+    // Use original case for answer; capitalize distractors to match
+    const answerDisplay = original.charAt(0).toUpperCase() + original.slice(1);
+    const choiceList = [answerDisplay, ...distractors.map(d => d.charAt(0).toUpperCase() + d.slice(1))];
+    const choices = shuffle(choiceList);
     usedSentences.add(s);
-    out.push({ type: "mcq", question: `Which word best fits: "${kwic}"?`, choices, answer: choices.indexOf(matched), explanation: `From source: "${s}"` });
+    out.push({ type: "mcq", question: `Which word best fits: "${kwic}"?`, choices, answer: choices.indexOf(answerDisplay), explanation: `From source: "${s}"` });
   }
   return out;
 }
@@ -516,7 +523,7 @@ export function generateNoAiQuiz(text, numQ, qType) {
       ...makeCauseEffect(sentences, q, usedSentences),
       ...makeSequence(sentences, q, usedSentences),
       ...makeComparison(sentences, q, allTerms, usedSentences),
-      ...makeVocabContext(sentences, q, tfidfScores, usedSentences),
+      ...makeVocabContext(sentences, q, tfidfScores, allTerms, usedSentences),
     ]);
     qs = pool.slice(0, numQ);
   }
