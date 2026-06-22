@@ -358,14 +358,13 @@ function shuffle(arr) {
 function makeKwicBlank(sentence, term) {
   const idx = sentence.indexOf(term);
   if (idx === -1) return null;
-  const WINDOW = 45;
-  const rawBefore = sentence.slice(Math.max(0, idx - WINDOW), idx);
-  const rawAfter = sentence.slice(idx + term.length, idx + term.length + WINDOW);
-  const before = idx > WINDOW ? rawBefore.replace(/^\S+\s*/, "") : rawBefore;
-  const after = idx + term.length + WINDOW < sentence.length ? rawAfter.replace(/\s*\S+$/, "") : rawAfter;
-  const prefix = idx > WINDOW ? "..." : "";
-  const suffix = idx + term.length + WINDOW < sentence.length ? "..." : "";
-  return `${prefix}${before}___________${after}${suffix}`;
+  const BEFORE_WINDOW = 45;
+  const rawBefore = sentence.slice(Math.max(0, idx - BEFORE_WINDOW), idx);
+  const before = idx > BEFORE_WINDOW ? rawBefore.replace(/^\S+\s*/, "") : rawBefore;
+  const prefix = idx > BEFORE_WINDOW ? "..." : "";
+  // Show full sentence after the blank — no truncation
+  const after = sentence.slice(idx + term.length).replace(/[.!?]+$/, "");
+  return `${prefix}${before}___________${after}`;
 }
 
 // ── Question builders ─────────────────────────────────────────────────────────
