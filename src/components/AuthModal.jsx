@@ -66,6 +66,8 @@ export default function AuthModal({ onClose }) {
   const [resetStep, setResetStep] = useState(1); // 1: email, 2: otp
   const [otpCode, setOtpCode] = useState("");
   const [cfToken, setCfToken] = useState(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const cooldownRef = useRef(null);
   const tsRef = useRef(null);
   const tsWidgetId = useRef(null);
 
@@ -177,6 +179,17 @@ export default function AuthModal({ onClose }) {
     setLoading(false);
   };
 
+  const startCooldown = (secs = 60) => {
+    clearInterval(cooldownRef.current);
+    setResendCooldown(secs);
+    cooldownRef.current = setInterval(() => {
+      setResendCooldown(n => {
+        if (n <= 1) { clearInterval(cooldownRef.current); return 0; }
+        return n - 1;
+      });
+    }, 1000);
+  };
+
   const handleSendOtp = async () => {
     setError(""); setLoading(true);
     try {
@@ -188,6 +201,26 @@ export default function AuthModal({ onClose }) {
       const data = await r.json();
       if (!r.ok) { setError(data.error || "Failed to send code."); setLoading(false); return; }
       setResetStep(2);
+      startCooldown(60);
+    } catch {
+      setError("Network error. Try again.");
+    }
+    setLoading(false);
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0) return;
+    setError(""); setLoading(true);
+    try {
+      const r = await fetch("/api/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await r.json();
+      if (!r.ok) { setError(data.error || "Failed to resend code."); setLoading(false); return; }
+      startCooldown(60);
+      setOtpCode("");
     } catch {
       setError("Network error. Try again.");
     }
@@ -264,10 +297,18 @@ export default function AuthModal({ onClose }) {
                 onClick={handleVerifyOtp} disabled={loading || otpCode.length !== 6}>
                 {loading ? "Verifying..." : "Verify Code"}
               </button>
-              <button style={{ background: "none", border: "none", color: "inherit", opacity: 0.45, fontSize: 12, cursor: "pointer", padding: 0, width: "100%", textAlign: "center" }}
-                onClick={() => { setResetStep(1); setOtpCode(""); setError(""); }}>
-                Resend or change email
-              </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                <button
+                  style={{ background: "none", border: "none", color: "inherit", fontSize: 12, cursor: resendCooldown > 0 ? "default" : "pointer", padding: 0, opacity: resendCooldown > 0 ? 0.35 : 0.65, transition: "opacity .2s" }}
+                  onClick={handleResendOtp}
+                  disabled={resendCooldown > 0 || loading}>
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
+                </button>
+                <button style={{ background: "none", border: "none", color: "inherit", opacity: 0.4, fontSize: 12, cursor: "pointer", padding: 0 }}
+                  onClick={() => { setResetStep(1); setOtpCode(""); setError(""); clearInterval(cooldownRef.current); setResendCooldown(0); }}>
+                  Change email
+                </button>
+              </div>
             </>
           ) : (
             <>

@@ -202,6 +202,11 @@ function ReportModal({ onClose }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: text.trim(), hasImage: !!image, image: image || null, createdAt: Date.now() }),
       });
+      fetch("/api/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim(), hasImage: !!image, page: window.location.pathname }),
+      }).catch(() => {});
       setStatus("done");
     } catch {
       setStatus("Something went wrong. Please try again.");
