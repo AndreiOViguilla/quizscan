@@ -461,8 +461,8 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
         try {
           const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
           const [antRes, trgRes] = await Promise.all([
-            fetch(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(wh.answer.toLowerCase())}&max=5`, { signal }),
-            fetch(`https://api.datamuse.com/words?rel_trg=${encodeURIComponent(wh.answer.toLowerCase())}&max=8`, { signal }),
+            fetch(`/api/datamuse?rel_ant=${encodeURIComponent(wh.answer.toLowerCase())}&max=5`, { signal }),
+            fetch(`/api/datamuse?rel_trg=${encodeURIComponent(wh.answer.toLowerCase())}&max=8`, { signal }),
           ]);
           const [antData, trgData] = await Promise.all([antRes.ok ? antRes.json() : [], trgRes.ok ? trgRes.json() : []]);
           const apiWords = [...antData, ...trgData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== wh.answer.toLowerCase());
@@ -489,8 +489,8 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
       try {
         const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
         const [antRes, trgRes] = await Promise.all([
-          fetch(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(answer.toLowerCase())}&max=5`, { signal }),
-          fetch(`https://api.datamuse.com/words?rel_trg=${encodeURIComponent(answer.toLowerCase())}&max=8`, { signal }),
+          fetch(`/api/datamuse?rel_ant=${encodeURIComponent(answer.toLowerCase())}&max=5`, { signal }),
+          fetch(`/api/datamuse?rel_trg=${encodeURIComponent(answer.toLowerCase())}&max=8`, { signal }),
         ]);
         const [antData, trgData] = await Promise.all([antRes.ok ? antRes.json() : [], trgRes.ok ? trgRes.json() : []]);
         const apiWords = [...antData, ...trgData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== answer.toLowerCase());
@@ -631,8 +631,8 @@ async function fetchDatamuseDistractors(word, textPool) {
   try {
     const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
     const [antRes, trgRes] = await Promise.all([
-      fetch(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(word)}&max=10`, { signal }),
-      fetch(`https://api.datamuse.com/words?rel_trg=${encodeURIComponent(word)}&max=15`, { signal }),
+      fetch(`/api/datamuse?rel_ant=${encodeURIComponent(word)}&max=10`, { signal }),
+      fetch(`/api/datamuse?rel_trg=${encodeURIComponent(word)}&max=15`, { signal }),
     ]);
     const [antData, trgData] = await Promise.all([
       antRes.ok ? antRes.json() : Promise.resolve([]),
@@ -762,7 +762,7 @@ async function makeErrorId(sentences, count, usedSentences) {
     for (const { word, index, raw } of shuffle(candidates).slice(0, 4)) {
       try {
         const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-        const res = await fetch(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(word)}&max=3`, { signal });
+        const res = await fetch(`/api/datamuse?rel_ant=${encodeURIComponent(word)}&max=3`, { signal });
         if (!res.ok) continue;
         const data = await res.json();
         const ant = data.map(d => d.word).find(w => w && !w.includes(" "));
