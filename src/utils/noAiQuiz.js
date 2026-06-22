@@ -791,6 +791,41 @@ async function makeErrorId(sentences, count, usedSentences) {
   return out;
 }
 
+// ── Neural sentence scoring (HuggingFace all-MiniLM-L6-v2) ───────────────────
+function cosineSimilarity(a, b) {
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB) + 1e-8);
+}
+
+function computeCentroid(embeddings) {
+  const dim = embeddings[0].length;
+  const c = new Array(dim).fill(0);
+  for (const e of embeddings) for (let i = 0; i < dim; i++) c[i] += e[i] / embeddings.length;
+  return c;
+}
+
+async function fetchEmbeddings(sentences) {
+  try {
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined;
+    const res = await fetch("/api/embed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sentences }),
+      signal,
+    });
+    if (!res.ok) return null;
+    const { embeddings } = await res.json();
+    return Array.isArray(embeddings) && embeddings.length === sentences.length ? embeddings : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function generateNoAiQuiz(text, numQ, qType) {
   const sentences = extractSentences(text);
@@ -801,30 +836,41 @@ export async function generateNoAiQuiz(text, numQ, qType) {
   const allTerms = [...new Set(sentences.flatMap(s => extractProperNouns(s)))];
   const usedSentences = new Set();
 
+  // Neural re-ranking: re-sort by semantic centrality, fall back to TF-IDF order
+  const batch = sentences.slice(0, 40);
+  const embeddings = await fetchEmbeddings(batch);
+  let ranked = sentences;
+  if (embeddings) {
+    const centroid = computeCentroid(embeddings);
+    const neuralScored = batch.map((s, i) => ({ s, score: cosineSimilarity(embeddings[i], centroid) }));
+    neuralScored.sort((a, b) => b.score - a.score);
+    ranked = [...neuralScored.map(x => x.s), ...sentences.slice(40)];
+  }
+
   let qs;
-  if (qType === "fill") qs = makeFill(sentences, numQ, tfidfScores, usedSentences);
-  else if (qType === "tf") qs = await makeTF(sentences, numQ, allTerms, usedSentences);
-  else if (qType === "mcq") qs = await makeMCQ(sentences, numQ, tfidfScores, allTerms, usedSentences);
-  else if (qType === "double_fill") qs = makeDoubleFill(sentences, numQ, tfidfScores, allTerms, usedSentences);
+  if (qType === "fill") qs = makeFill(ranked, numQ, tfidfScores, usedSentences);
+  else if (qType === "tf") qs = await makeTF(ranked, numQ, allTerms, usedSentences);
+  else if (qType === "mcq") qs = await makeMCQ(ranked, numQ, tfidfScores, allTerms, usedSentences);
+  else if (qType === "double_fill") qs = makeDoubleFill(ranked, numQ, tfidfScores, allTerms, usedSentences);
   else {
     // Mixed: generate from all types, shuffle, take numQ
     const q = Math.ceil(numQ / 3);
     const [tfQs, vocabQs, mcqQs, errorQs] = await Promise.all([
-      makeTF(sentences, q, allTerms, usedSentences),
-      makeVocabContext(sentences, q, tfidfScores, allTerms, usedSentences),
-      makeMCQ(sentences, q, tfidfScores, allTerms, usedSentences),
-      makeErrorId(sentences, Math.ceil(q / 2), usedSentences),
+      makeTF(ranked, q, allTerms, usedSentences),
+      makeVocabContext(ranked, q, tfidfScores, allTerms, usedSentences),
+      makeMCQ(ranked, q, tfidfScores, allTerms, usedSentences),
+      makeErrorId(ranked, Math.ceil(q / 2), usedSentences),
     ]);
     const pool = shuffle([
       ...mcqQs,
       ...tfQs,
-      ...makeFill(sentences, q, tfidfScores, usedSentences),
-      ...makeCauseEffect(sentences, q, usedSentences),
-      ...makeSequence(sentences, q, usedSentences),
-      ...makeComparison(sentences, q, allTerms, usedSentences),
-      ...makeDoubleFill(sentences, q, tfidfScores, allTerms, usedSentences),
+      ...makeFill(ranked, q, tfidfScores, usedSentences),
+      ...makeCauseEffect(ranked, q, usedSentences),
+      ...makeSequence(ranked, q, usedSentences),
+      ...makeComparison(ranked, q, allTerms, usedSentences),
+      ...makeDoubleFill(ranked, q, tfidfScores, allTerms, usedSentences),
       ...makeOrdering(sentencesOrdered, Math.ceil(q / 2), usedSentences),
-      ...makeMainIdea(sentences, usedSentences),
+      ...makeMainIdea(ranked, usedSentences),
       ...vocabQs,
       ...errorQs,
     ]);
