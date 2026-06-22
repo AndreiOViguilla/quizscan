@@ -39,12 +39,11 @@ module.exports = async function handler(req, res) {
       }
     );
     clearTimeout(timer);
-    if (!r.ok) return res.status(502).json({ error: "Embedding model unavailable" });
-    const embeddings = await r.json();
-    if (!Array.isArray(embeddings)) return res.status(502).json({ error: "Unexpected response" });
-    return res.status(200).json({ embeddings });
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !Array.isArray(data)) return res.status(200).json({ embeddings: null });
+    return res.status(200).json({ embeddings: data });
   } catch {
     clearTimeout(timer);
-    return res.status(502).json({ error: "Embedding request failed" });
+    return res.status(200).json({ embeddings: null });
   }
 };
