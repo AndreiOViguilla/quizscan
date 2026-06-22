@@ -446,7 +446,7 @@ function makeCauseEffect(sentences, count, usedSentences) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
     const ce = extractCauseEffect(s);
-    if (!ce || !questionOk(ce.question) || ce.answer.length < 5) continue;
+    if (!ce || !questionOk(ce.question) || ce.answer.length < 5 || ce.answer.length > 60) continue;
     usedSentences.add(s);
     out.push({ type: "fill", question: ce.question, answer: trimAnswer(ce.answer), explanation: `From source: "${s}"` });
   }
@@ -460,7 +460,7 @@ function makeSequence(sentences, count, usedSentences) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
     const seq = extractSequence(s);
-    if (!seq || !questionOk(seq.question) || seq.answer.length < 5) continue;
+    if (!seq || !questionOk(seq.question) || seq.answer.length < 5 || seq.answer.length > 60) continue;
     usedSentences.add(s);
     out.push({ type: "fill", question: seq.question, answer: trimAnswer(seq.answer), explanation: `From source: "${s}"` });
   }

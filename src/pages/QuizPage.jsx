@@ -223,6 +223,21 @@ export default function QuizPage() {
     finally { setAdaptingQ(false); }
   };
 
+  const fillMatches = (userInput, correctAnswer) => {
+    const ua = userInput.toLowerCase().trim();
+    const ca = correctAnswer.toLowerCase().replace(/…$/, "").trim();
+    if (ua === ca) return true;
+    // For short answers (≤4 words) require near-exact match
+    const caWords = ca.split(/\s+/);
+    if (caWords.length <= 4) return ua === ca || ca.includes(ua) && ua.length >= ca.length * 0.8;
+    // For longer answers, check that the user typed most of the key words
+    const SKIP = new Set(["the","a","an","is","are","was","were","of","in","on","at","by","for","with","and","but","or","to","it","its","this","that","from","into","as","had","has","been","their","which","also"]);
+    const keys = caWords.filter(w => w.length > 2 && !SKIP.has(w));
+    if (!keys.length) return ua.includes(ca.substring(0, 15));
+    const matched = keys.filter(w => ua.includes(w));
+    return matched.length / keys.length >= 0.6;
+  };
+
   const submitAnswer = (force = null) => {
     if (revealed) return;
     const q = questions[current];
@@ -232,7 +247,7 @@ export default function QuizPage() {
     let correct = false;
     if (q.type === "mcq") correct = ua === q.answer;
     else if (q.type === "tf") correct = ua.toLowerCase() === String(q.answer).toLowerCase();
-    else correct = String(ua).toLowerCase() === String(q.answer).toLowerCase();
+    else correct = fillMatches(ua, String(q.answer));
     if (useSounds) playSound(correct ? "correct" : "wrong");
     const ns = correct ? streak + 1 : 0;
     setStreak(ns); setBestStreak(b => Math.max(b, ns));
