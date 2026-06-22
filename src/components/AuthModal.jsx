@@ -193,10 +193,10 @@ export default function AuthModal({ onClose }) {
   const handleSendOtp = async () => {
     setError(""); setLoading(true);
     try {
-      const r = await fetch("/api/send-otp", {
+      const r = await fetch("/api/otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ action: "send", email }),
       });
       const data = await r.json();
       if (!r.ok) { setError(data.error || "Failed to send code."); setLoading(false); return; }
@@ -212,10 +212,10 @@ export default function AuthModal({ onClose }) {
     if (resendCooldown > 0) return;
     setError(""); setLoading(true);
     try {
-      const r = await fetch("/api/send-otp", {
+      const r = await fetch("/api/otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ action: "send", email }),
       });
       const data = await r.json();
       if (!r.ok) { setError(data.error || "Failed to resend code."); setLoading(false); return; }
@@ -230,10 +230,10 @@ export default function AuthModal({ onClose }) {
   const handleVerifyOtp = async () => {
     setError(""); setLoading(true);
     try {
-      const r = await fetch("/api/verify-otp", {
+      const r = await fetch("/api/otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, otp: otpCode }),
+        body: JSON.stringify({ action: "verify", email, otp: otpCode }),
       });
       const data = await r.json();
       if (!r.ok) { setError(data.error || "Verification failed."); setLoading(false); return; }
