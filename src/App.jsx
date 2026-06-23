@@ -184,6 +184,15 @@ function InnerApp() {
 
   useEffect(() => { cleanupExpiredRooms(); }, []);
 
+  const { setShowAuthModal } = useApp();
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("reset") === "1") {
+      setShowAuthModal(true);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
   useEffect(() => {
     let el = document.getElementById("qs-global-styles");
     if (!el) { el = document.createElement("style"); el.id = "qs-global-styles"; document.head.appendChild(el); }

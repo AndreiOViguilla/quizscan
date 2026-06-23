@@ -63,6 +63,9 @@ async function handleSend(email, res) {
     <div style="background:#18181b;border:1px solid #27272a;border-radius:10px;padding:24px 0;text-align:center;margin-bottom:28px;">
       <span style="font-size:40px;font-weight:700;letter-spacing:14px;font-family:monospace;">${otp}</span>
     </div>
+    <div style="text-align:center;margin-bottom:28px;">
+      <a href="${process.env.APP_URL || "https://quizscan.vercel.app"}?reset=1" style="display:inline-block;background:#fff;color:#000;font-weight:700;font-size:14px;padding:12px 32px;border-radius:8px;text-decoration:none;letter-spacing:-0.2px;">Go to QuizScan →</a>
+    </div>
     <p style="margin:0;color:#52525b;font-size:12px;">If you didn't request a password reset, you can safely ignore this email.</p>
   </div>
 </div>`,
