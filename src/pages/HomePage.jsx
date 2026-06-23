@@ -823,7 +823,7 @@ export default function HomePage() {
 
       ) : (
         <>
-          <button className="back-btn" onClick={() => setShowSettings(false)}>← Back</button>
+          <button className="back-btn" onClick={() => { setShowSettings(false); setGenerated(null); }}>← Back</button>
           <div className="page-heading">Settings</div>
 
           <div style={{ display: "grid", gridTemplateColumns: "auto auto 1fr", gap: 12, alignItems: "end", marginBottom: 20 }}>
