@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from "react";
+import { useEffect, lazy, Suspense, useState } from "react";
 import { AppProvider, useApp } from "./context/AppContext";
 import { SettingsProvider } from "./context/SettingsContext";
 import { QuizProvider, useQuiz } from "./context/QuizContext";
@@ -108,8 +108,79 @@ function IdleLogout() {
   return null;
 }
 
+function TermsModal({ onAccept, onDecline }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 10000,
+      background: "rgba(0,0,0,0.85)", backdropFilter: "blur(6px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+    }}>
+      <div style={{
+        background: "var(--bg2)", border: "1px solid var(--bdr)",
+        borderRadius: 16, padding: "32px", maxWidth: 520, width: "100%",
+        maxHeight: "80vh", display: "flex", flexDirection: "column", gap: 0,
+        boxShadow: "0 24px 80px rgba(0,0,0,0.5)",
+      }}>
+        <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 4 }}>Terms of Service</div>
+        <div style={{ fontSize: 11, opacity: 0.4, marginBottom: 20 }}>Last updated: June 2026</div>
+
+        <div style={{ overflowY: "auto", flex: 1, fontSize: 13, lineHeight: 1.7, color: "var(--txt2)", display: "flex", flexDirection: "column", gap: 16 }}>
+          <section>
+            <div style={{ fontWeight: 600, color: "var(--txt)", marginBottom: 4 }}>1. Acceptance</div>
+            <p style={{ margin: 0 }}>By using QuizScan, you agree to these terms. If you do not agree, please do not use this service.</p>
+          </section>
+          <section>
+            <div style={{ fontWeight: 600, color: "var(--txt)", marginBottom: 4 }}>2. About This Service</div>
+            <p style={{ margin: 0 }}>QuizScan is a student-made tool that generates quizzes from your content using AI and pattern-matching. It is not affiliated with any university, institution, or AI provider.</p>
+          </section>
+          <section>
+            <div style={{ fontWeight: 600, color: "var(--txt)", marginBottom: 4 }}>3. Accuracy Disclaimer</div>
+            <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+              <li>AI-generated questions may be incomplete, inaccurate, or misleading.</li>
+              <li>Do not rely solely on QuizScan for academic, professional, or critical decisions.</li>
+              <li>Always verify generated content against your original source material.</li>
+            </ul>
+          </section>
+          <section>
+            <div style={{ fontWeight: 600, color: "var(--txt)", marginBottom: 4 }}>4. Acceptable Use</div>
+            <p style={{ margin: 0, marginBottom: 6 }}>You agree not to use this service to:</p>
+            <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+              <li>Submit harmful, abusive, or offensive content</li>
+              <li>Attempt to manipulate or jailbreak the AI</li>
+              <li>Use outputs to facilitate academic dishonesty</li>
+              <li>Upload content you do not have rights to use</li>
+            </ul>
+          </section>
+          <section>
+            <div style={{ fontWeight: 600, color: "var(--txt)", marginBottom: 4 }}>5. Privacy</div>
+            <p style={{ margin: 0 }}>QuizScan does not sell your data. Content you submit is processed to generate quizzes and is not stored beyond your session unless you explicitly save or share it.</p>
+          </section>
+          <section>
+            <div style={{ fontWeight: 600, color: "var(--txt)", marginBottom: 4 }}>6. Limitation of Liability</div>
+            <p style={{ margin: 0 }}>The creators of QuizScan are not responsible for any consequences resulting from the use or misuse of AI-generated content.</p>
+          </section>
+          <section>
+            <div style={{ fontWeight: 600, color: "var(--txt)", marginBottom: 4 }}>7. Changes</div>
+            <p style={{ margin: 0 }}>These terms may be updated at any time. Continued use of the service implies acceptance of any changes.</p>
+          </section>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
+          <button className="btn-primary" style={{ flex: 1, padding: "12px" }} onClick={onAccept}>
+            I Agree — Start Using QuizScan →
+          </button>
+          <button className="btn-secondary" style={{ padding: "12px 20px" }} onClick={onDecline}>
+            Decline
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InnerApp() {
   const { dark, confetti, page, navigate } = useApp();
+  const [tosAccepted, setTosAccepted] = useState(() => !!localStorage.getItem("qs-tos-accepted"));
 
   useEffect(() => { cleanupExpiredRooms(); }, []);
 
@@ -127,6 +198,12 @@ function InnerApp() {
 
   return (
     <div className="app-shell">
+      {!tosAccepted && (
+        <TermsModal
+          onAccept={() => { localStorage.setItem("qs-tos-accepted", "1"); setTosAccepted(true); }}
+          onDecline={() => { window.location.href = "about:blank"; }}
+        />
+      )}
       <Confetti active={confetti} />
       <Header />
       <main className="app-body">
