@@ -179,12 +179,10 @@ function TermsModal({ onAccept, onDecline }) {
 }
 
 function InnerApp() {
-  const { dark, confetti, page, navigate } = useApp();
+  const { dark, confetti, page, navigate, setShowAuthModal } = useApp();
   const [tosAccepted, setTosAccepted] = useState(() => !!localStorage.getItem("qs-tos-accepted"));
 
   useEffect(() => { cleanupExpiredRooms(); }, []);
-
-  const { setShowAuthModal } = useApp();
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("reset") === "1") {
@@ -210,7 +208,7 @@ function InnerApp() {
       {!tosAccepted && (
         <TermsModal
           onAccept={() => { localStorage.setItem("qs-tos-accepted", "1"); setTosAccepted(true); }}
-          onDecline={() => { window.location.href = "about:blank"; }}
+          onDecline={() => { document.body.innerHTML = '<div style="height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui;color:#fff;background:#0d0d0d;font-size:15px;text-align:center;padding:24px">You must accept the Terms of Service to use QuizScan.</div>'; }}
         />
       )}
       <Confetti active={confetti} />

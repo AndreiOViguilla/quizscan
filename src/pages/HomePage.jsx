@@ -362,12 +362,14 @@ export default function HomePage() {
       return;
     }
 
+    setIsGenerating(true);
+    setGenStatus("Checking content...");
+
     // PromptGuard: check user text inputs for injection attempts
     const backendUrl = process.env.REACT_APP_BACKEND_URL;
     if (backendUrl && inputToCheck) {
       try {
         let textToCheck = inputToCheck;
-        // Translate to English first if not English so the model understands it
         if (lang && lang !== "English") {
           const tr = await fetch(`${backendUrl}/translate`, {
             method: "POST",
@@ -384,12 +386,11 @@ export default function HomePage() {
         });
         if (pg.ok) {
           const { flagged } = await pg.json();
-          if (flagged) { setError("This input was flagged as a potential prompt injection attempt."); return; }
+          if (flagged) { setIsGenerating(false); setGenStatus(""); setError("This input was flagged as a potential prompt injection attempt."); return; }
         }
       } catch {}
     }
-
-    setIsGenerating(true);
+    setGenStatus("");
 
     // ── No-AI path ──────────────────────────────────────────────────────────
     if (noAi) {
@@ -689,7 +690,8 @@ export default function HomePage() {
       setMpSyncMode(room.syncMode || "self");
       const listener = new FirebaseListener(`/rooms/${code}/players`, (ps) => {
         if (ps === null || ps === undefined) {
-          setMpStatus("room-closed");
+          setMpError("The room was closed by the host.");
+          navigate("home");
           return;
         }
         if (typeof ps === "object") {
