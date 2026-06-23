@@ -817,7 +817,7 @@ async function makeErrorId(sentences, count, usedSentences) {
 }
 
 // ── Translation (Python backend on Render) ────────────────────────────────────
-async function translateQuestions(questions, lang) {
+export async function translateQuestions(questions, lang) {
   if (!lang || lang === "English") return questions;
   const backendUrl = process.env.REACT_APP_BACKEND_URL;
   if (!backendUrl) return questions;
@@ -961,7 +961,6 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     qs = pool.slice(0, numQ);
   }
   if (!qs.length) throw new Error("Could not extract enough questions. Try a source with more complete sentences.");
-  if (lang && lang !== "English") qs = await translateQuestions(qs, lang);
   return qs;
 }
 

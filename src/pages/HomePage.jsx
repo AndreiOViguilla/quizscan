@@ -10,7 +10,7 @@ import { shareQuizPublicly } from "./FindPage";
 import { useAuth } from "../context/AuthContext";
 import { getIdToken } from "../utils/firebase";
 import { LANGUAGES } from "../utils/constants";
-import { generateNoAiQuiz, extractPdfText } from "../utils/noAiQuiz";
+import { generateNoAiQuiz, extractPdfText, translateQuestions } from "../utils/noAiQuiz";
 
 const TABS = [
   ["pdf", "PDF"], ["image", "Image"], ["text", "Text"],
@@ -409,8 +409,12 @@ export default function HomePage() {
         }
         if (!sourceText || sourceText.length < 100) throw new Error("Not enough content found to generate questions.");
         setGenStatus("Generating questions...");
-        const qs = await generateNoAiQuiz(sourceText, numQ, qType, lang);
+        let qs = await generateNoAiQuiz(sourceText, numQ, qType);
         if (!qs.length) throw new Error("Could not extract enough questions. Try a different source.");
+        if (lang && lang !== "English") {
+          setGenStatus(`Translating to ${lang}...`);
+          qs = await translateQuestions(qs, lang);
+        }
         await startQuiz(qs);
       } catch (e) {
         setError(e.message || "No AI generation failed.");
