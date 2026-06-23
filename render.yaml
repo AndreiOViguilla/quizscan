@@ -7,3 +7,5 @@ services:
     envVars:
       - key: ALLOWED_ORIGIN
         value: https://quizscan.vercel.app
+      - key: HF_TOKEN
+        sync: false

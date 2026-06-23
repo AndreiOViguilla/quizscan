@@ -82,6 +82,7 @@ export default function HomePage() {
     mpRealtimeRef, setMpCode, setMpMode, setMpPlayers, setMyMpName, setMpSyncMode,
   } = useMultiplayer();
 
+  const [stats, setStats] = useState(null);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [drag, setDrag] = useState(false);
   const [showManual, setShowManual] = useState(false);
@@ -138,9 +139,21 @@ export default function HomePage() {
     setShowVerifyModal(true);
   };
 
+  const FB_STATS = "https://quizscan-94acb-default-rtdb.asia-southeast1.firebasedatabase.app/stats";
+  const bumpStat = (key) => {
+    fetch(`${FB_STATS}/${key}.json`).then(r => r.json()).then(val =>
+      fetch(`${FB_STATS}/${key}.json`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify((val || 0) + 1) })
+    ).catch(() => {});
+  };
+
   useEffect(() => {
     const saved = loadDraft();
     if (saved?.length) setDraft(saved);
+    fetch(`${FB_STATS}.json`).then(r => r.json()).then(d => setStats(d)).catch(() => {});
+    if (!sessionStorage.getItem("qs-visited")) {
+      sessionStorage.setItem("qs-visited", "1");
+      bumpStat("visits");
+    }
   }, []);
 
   useEffect(() => {
@@ -240,6 +253,7 @@ export default function HomePage() {
   };
 
   const startQuiz = async (qs) => {
+    bumpStat("quizzes");
     setQuestions(qs);
     saveDraft(qs);
     if (!user) {
@@ -255,6 +269,11 @@ export default function HomePage() {
     setGenerated(qs);
     setIsGenerating(false);
     setShowSettings(true);
+  };
+
+  const NSFW_DOMAINS = ["pornhub","xvideos","xhamster","onlyfans","brazzers","redtube","youporn","tube8","spankbang","xnxx","rule34","nhentai","hentaihaven","chaturbate","stripchat","livejasmin","bongacams","cam4","myfreecams"];
+  const isNsfwUrl = (url) => {
+    try { const h = new URL(url).hostname.toLowerCase(); return NSFW_DOMAINS.some(d => h.includes(d)); } catch { return false; }
   };
 
   const INJECTION_PATTERNS = [
@@ -337,6 +356,37 @@ export default function HomePage() {
     if (inputToCheck && isInappropriate(inputToCheck)) {
       setError("This content is not appropriate and cannot be used to generate a quiz. Please enter a different topic.");
       return;
+    }
+    if (tab === "url" && isNsfwUrl(urlVal)) {
+      setError("This URL is not allowed.");
+      return;
+    }
+
+    // PromptGuard: check user text inputs for injection attempts
+    const backendUrl = process.env.REACT_APP_BACKEND_URL;
+    if (backendUrl && inputToCheck) {
+      try {
+        let textToCheck = inputToCheck;
+        // Translate to English first if not English so the model understands it
+        if (lang && lang !== "English") {
+          const tr = await fetch(`${backendUrl}/translate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ texts: [inputToCheck], target: "English", source: "auto" }),
+          });
+          if (tr.ok) { const d = await tr.json(); textToCheck = d.translations?.[0] || inputToCheck; }
+        }
+        const pg = await fetch(`${backendUrl}/check-injection`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: textToCheck }),
+          signal: AbortSignal.timeout ? AbortSignal.timeout(7000) : undefined,
+        });
+        if (pg.ok) {
+          const { flagged } = await pg.json();
+          if (flagged) { setError("This input was flagged as a potential prompt injection attempt."); return; }
+        }
+      } catch {}
     }
 
     setIsGenerating(true);
@@ -685,6 +735,11 @@ export default function HomePage() {
           <div className="home-hero">
             <h1 className="home-title">Turn any content<br />into a quiz.</h1>
             <p className="home-sub">PDF · image · text · URL · YouTube · topic</p>
+            {stats && (
+              <p style={{ fontSize: 12, opacity: 0.35, marginTop: 8 }}>
+                {(stats.quizzes || 0).toLocaleString()} quizzes generated · {(stats.visits || 0).toLocaleString()} visitors
+              </p>
+            )}
           </div>
 
           <div className="home-modes">
@@ -925,7 +980,7 @@ export default function HomePage() {
                         <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
                       </svg>
                     </div>
-                    <div className="mode-card-title">Scan Mode <span style={{ fontSize: 9, fontWeight: 700, background: "#f59e0b", color: "#000", borderRadius: 4, padding: "1px 5px", verticalAlign: "middle", letterSpacing: 0.5 }}>BETA</span></div>
+                    <div className="mode-card-title">Scan Mode <span style={{ fontSize: 9, fontWeight: 700, border: "1px solid currentColor", borderRadius: 4, padding: "1px 5px", verticalAlign: "middle", letterSpacing: 0.5, opacity: 0.5 }}>BETA</span></div>
                     <div className="mode-card-desc">Instant · No LLM · Token-free</div>
                   </button>
                   <button className={`mode-card${!noAi ? " active" : ""}`} onClick={() => setNoAi(false)}>
@@ -998,6 +1053,9 @@ export default function HomePage() {
             </button>
           )}
           {genStatus && !isGenerating && <div className="alert-info" style={{ marginTop: 8, fontSize: 12 }}>{genStatus}</div>}
+          <p style={{ fontSize: 11, opacity: 0.35, textAlign: "center", marginTop: 10 }}>
+            AI may generate inaccurate content. Always verify important information.
+          </p>
 
           <div style={{ marginTop: 28 }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: "var(--txt2)" }}>Host a game</div>
