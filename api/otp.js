@@ -71,9 +71,9 @@ async function handleSend(email, res) {
 </div>`,
       }),
     });
-    if (!r.ok) return res.status(500).json({ error: "Failed to send email. Try again later." });
+    // Always return success — never reveal if email exists or send failed
     return res.status(200).json({ ok: true });
-  } catch { return res.status(500).json({ error: "Failed to send email." }); }
+  } catch { return res.status(200).json({ ok: true }); }
 }
 
 async function handleVerify(email, otp, res) {

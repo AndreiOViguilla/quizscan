@@ -278,7 +278,7 @@ export default function AuthModal({ onClose }) {
           ) : resetStep === 2 ? (
             <>
               <div style={{ fontSize: 13, opacity: 0.55, marginBottom: 16, lineHeight: 1.5 }}>
-                A 6-digit code was sent to <strong style={{ opacity: 1 }}>{email}</strong>. Check your inbox and enter it below.
+                If an account with that email exists, a 6-digit code was sent. Check your inbox and spam folder.
               </div>
               <label className="field-label">Verification Code</label>
               <input
