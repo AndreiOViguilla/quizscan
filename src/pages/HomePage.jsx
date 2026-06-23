@@ -680,57 +680,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {generated && !showSettings ? (
-        <>
-          <div style={{ textAlign: "center", padding: "60px 0 40px" }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>
-              <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" width="64" height="64" style={{ margin: "0 auto", display: "block" }}>
-                <circle cx="32" cy="32" r="30" stroke="currentColor" strokeWidth="1.5" opacity="0.3"/>
-                <path d="M20 32l8 8 16-16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </div>
-            <h2 style={{ fontSize: 26, fontWeight: 700, marginBottom: 8 }}>Quiz generated!</h2>
-            <p style={{ opacity: 0.5, fontSize: 14, marginBottom: 32 }}>{generated.length} questions ready</p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-              <button className="btn-primary" style={{ padding: "12px 32px", fontSize: 15 }}
-                onClick={() => { navigate("edit"); }}>
-                Review & Start
-              </button>
-              <button className="btn-secondary" style={{ padding: "12px 20px" }}
-                onClick={() => { setGenerated(null); setShowSettings(false); }}>
-                Generate again
-              </button>
-              <button className="btn-secondary" style={{ padding: "12px 20px" }}
-                onClick={() => {
-                  if (!user) { setShowAuthModal(true); return; }
-                  requireVerify(async () => {
-                    const topic = topicVal || file?.name || urlVal || ytVal || "Shared Quiz";
-                    const idToken = await getIdToken();
-                    await shareQuizPublicly(generated, topic, user.displayName || user.email?.split("@")[0] || "Anonymous", user.uid, idToken);
-                    setShared(true);
-                  });
-                }}>
-                {shared ? "Shared!" : "Share Publicly"}
-              </button>
-            </div>
-          </div>
-
-          <hr className="section-divider" />
-
-          <div className="card">
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Join a game</div>
-            <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>Enter a room code to join a friend</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input className="field-input" placeholder="Enter code" maxLength={4}
-                value={mpJoinCode} onChange={e => setMpJoinCode(e.target.value.toUpperCase())}
-                style={{ letterSpacing: 4, fontWeight: 700, textAlign: "center", flex: 1 }} />
-              <button className="btn-primary" onClick={joinGame}>Join</button>
-            </div>
-            {mpError && <div className="alert-error" style={{ marginTop: 10 }}>{mpError}</div>}
-          </div>
-        </>
-
-      ) : !showSettings ? (
+      {!showSettings ? (
         <>
           <div className="home-hero">
             <h1 className="home-title">Turn any content<br />into a quiz.</h1>
