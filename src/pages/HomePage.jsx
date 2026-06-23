@@ -975,7 +975,7 @@ export default function HomePage() {
                         <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
                       </svg>
                     </div>
-                    <div className="mode-card-title">Scan Mode</div>
+                    <div className="mode-card-title">Scan Mode <span style={{ fontSize: 9, fontWeight: 700, background: "#f59e0b", color: "#000", borderRadius: 4, padding: "1px 5px", verticalAlign: "middle", letterSpacing: 0.5 }}>BETA</span></div>
                     <div className="mode-card-desc">Instant · No LLM · Token-free</div>
                   </button>
                   <button className={`mode-card${!noAi ? " active" : ""}`} onClick={() => setNoAi(false)}>
