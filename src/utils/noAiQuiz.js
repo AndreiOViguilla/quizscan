@@ -1365,6 +1365,9 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
       ...makeSuperlative(ranked, q, usedSentences),
       ...makeListQuestion(ranked, q, allTerms, usedSentences),
       ...makeCooccurrence(ranked, Math.ceil(q / 2), usedSentences),
+      ...makeQuantityQuestion(ranked, q, usedSentences),
+      ...makeTimeline(ranked, Math.ceil(q / 2), usedSentences),
+      ...makeContrast(ranked, q, allTerms, usedSentences),
       ...vocabQs,
       ...errorQs,
     ]);
