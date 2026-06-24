@@ -18,10 +18,10 @@ async function signRequest(bodyStr) {
 
 // ─── GROQ ─────────────────────────────────────────────────────────────────────
 export async function groq(messages, model = "llama-3.3-70b-versatile", maxTokens = 8000) {
-  const res = await fetch("/api/groq", {
+  const res = await fetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, model, maxTokens }),
+    body: JSON.stringify({ provider: "groq", messages, model, maxTokens }),
   });
   const data = await res.json();
   if (!res.ok || data.error) throw new Error(data.error || "Groq request failed");
@@ -52,10 +52,10 @@ export async function generateText(messages, maxTokens = 8000, cfToken = null) {
 
   // 2. Fall back to Groq (via backend proxy to avoid CORS)
   try {
-    const res = await fetch("/api/groq", {
+    const res = await fetch("/api/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, model: "llama-3.3-70b-versatile", maxTokens, cfToken }),
+      body: JSON.stringify({ provider: "groq", messages, model: "llama-3.3-70b-versatile", maxTokens, cfToken }),
     });
     const data = await res.json();
     if (res.ok && data.content) return data.content;
@@ -71,10 +71,10 @@ export async function generateText(messages, maxTokens = 8000, cfToken = null) {
 
   // 3. Fall back to Gemini
   try {
-    const res = await fetch("/api/gemini", {
+    const res = await fetch("/api/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, maxTokens }),
+      body: JSON.stringify({ provider: "gemini", messages, maxTokens }),
     });
     const data = await res.json();
     if (res.ok && data.content) return data.content;
@@ -85,10 +85,10 @@ export async function generateText(messages, maxTokens = 8000, cfToken = null) {
 
   // 4. Fall back to Mistral
   try {
-    const res = await fetch("/api/mistral", {
+    const res = await fetch("/api/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, maxTokens }),
+      body: JSON.stringify({ provider: "mistral", messages, maxTokens }),
     });
     const data = await res.json();
     if (res.ok && data.content) return data.content;
@@ -99,10 +99,10 @@ export async function generateText(messages, maxTokens = 8000, cfToken = null) {
 
   // 5. Fall back to OpenRouter
   try {
-    const res = await fetch("/api/openrouter", {
+    const res = await fetch("/api/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, maxTokens }),
+      body: JSON.stringify({ provider: "openrouter", messages, maxTokens }),
     });
     const data = await res.json();
     if (res.ok && data.content) return data.content;

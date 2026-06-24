@@ -1,4 +1,8 @@
-// Rule-based quiz generator — no AI, no external libraries
+// Rule-based quiz generator — no LLM calls; uses wink-nlp for POS/NER + spaCy (backend) for dep parsing
+import winkNLP from 'wink-nlp';
+import model from 'wink-eng-lite-web-model';
+import its from 'wink-nlp/src/its.js';
+const wink = winkNLP(model);
 
 // ── Stop words ───────────────────────────────────────────────────────────────
 const STOP = new Set(["the","a","an","is","are","was","were","be","been","being","have","has","had","do","does","did","will","would","could","should","may","might","shall","can","and","but","or","nor","so","yet","to","of","in","on","at","by","for","with","about","into","from","up","out","over","then","once","also","as","if","while","because","since","although","though","unless","until","when","where","who","which","that","this","these","those","i","you","he","she","it","we","they","me","him","her","us","them","my","your","his","its","our","their","what","how","all","each","every","some","any","few","more","most","other","such","not","no","only","own","same","than","too","very","just","both","either","neither"]);
@@ -101,24 +105,46 @@ function scoreSentence(s, idx, total, isParaFirst = false) {
   return score;
 }
 
+// Protect abbreviation periods so they don't trigger sentence splitting.
+// Replaces the period in known abbreviations with \x02 (a control char never in normal text).
+function protectAbbrev(text) {
+  return text
+    // Titles and honorifics: "Dr. Smith"
+    .replace(/\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|Lt|Capt|Gen|Sgt|Cpl|Rev|Gov|Sen|Rep|Pres|Atty|Adm|Cmdr|Cpl|Pvt|Spc|Cdr)\.\s+(?=[A-Z])/g, '$1\x02 ')
+    // Latin / academic: "e.g.", "i.e.", "et al.", "etc.", "vs.", "ibid.", "op. cit."
+    .replace(/\b(e\.g|i\.e|et\sal|etc|vs|ibid|op\.cit|p\.s|a\.k\.a)\./gi, '$1\x02')
+    // Geographic: "U.S.", "U.K.", "U.N." — single-letter sequences "X.Y.Z."
+    .replace(/\b([A-Z])\.(?=[A-Z]\.)/g, '$1\x02')   // U.S.A → U\x02S\x02A
+    .replace(/\b([A-Z])\.\s+(?=[A-Z])/g, '$1\x02 ') // J. K. Rowling → J\x02 K\x02 Rowling
+    // Months abbreviated in dates: "Jan. 3"
+    .replace(/\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.\s+(?=\d)/g, '$1\x02 ')
+    // Number abbreviations: "No. 1", "vol. 2", "p. 12"
+    .replace(/\b(No|Vol|pp?|Ed|Fig|Eq|Sec|Ref|Dept|Govt|Approx|Est)\.\s+(?=\d)/gi, '$1\x02 ');
+}
+function restoreAbbrev(text) { return text.replace(/\x02/g, '.'); }
+
 function extractSentences(text, { sorted = true } = {}) {
   const HAS_VERB = /\b(is|are|was|were|had|has|did|do|does|said|told|made|went|came|felt|looked|asked|moved|played|built|wrote|found|knew|wanted|liked|began|started|ended|called|named|liked|showed|gave|took|kept|left|put|got|set|ran|saw|thought|brought|bought|tried|heard|felt|stood|fell|held|grew|sent|met|led|read|lost|spent|born|raised|died|lived)\b/i;
   const MONTHS = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/;
   const SUBJECTIVE = /\b(i think|i believe|perhaps|maybe|it seems|many believe|some say|in my opinion|possibly|probably)\b/i;
 
+  const cleaned = cleanText(text);
+  const safeCleaned = protectAbbrev(cleaned);
+
   // Build set of paragraph-first sentences
   const paraFirstSet = new Set(
-    cleanText(text)
+    safeCleaned
       .split(/\n{2,}/)
       .map(para => {
         const parts = para.split(/(?<=[.!?])\s+(?=[A-Z"(])/);
-        return parts.length > 0 ? parts[0].trim() : "";
+        return parts.length > 0 ? restoreAbbrev(parts[0].trim()) : "";
       })
       .filter(Boolean)
   );
 
-  const raw = cleanText(text)
+  const raw = safeCleaned
     .split(/(?<=[.!?])\s+(?=[A-Z"(])/)
+    .map(s => restoreAbbrev(s.trim()))
     .map(s => s.trim())
     .filter(s => {
       if (s.length <= 35 || s.split(" ").length < 6) return false;
@@ -136,6 +162,8 @@ function extractSentences(text, { sorted = true } = {}) {
       if ((s.match(/\[\d/g) || []).length >= 3) return false;
       // Reject FAQ-style question sentences (website "Related Questions" sections)
       if (/^(How|What|Who|Why|When|Where|Which)\s+\w.{5,}\?$/.test(s)) return false;
+      // Reject sentences that depend on prior context to make sense
+      if (/^(This|These|Those|Such|The former|The latter|The following|As mentioned|As noted|As described|As seen above|In this case|In that case|At this point|At that time)\b/i.test(s)) return false;
       // Reject sentences still containing web UI residue
       if (/\b(IconBritannica|Ask\s*Anything|Quick\s*Summary|Related\s*Questions?|Britannica\s*AI)\b/i.test(s)) return false;
       // Reject image caption fragments (pattern: "N of N [proper noun] [action verb]...")
@@ -172,6 +200,9 @@ function tfidf(sentences) {
 }
 
 // ── Named entity detection ────────────────────────────────────────────────────
+// Strip punctuation compromise sometimes attaches to entity strings
+function cleanNlpToken(t) { return t.replace(/[^a-zA-Z\s'-]/g, '').trim(); }
+
 function detectEntityType(term) {
   if (/^\d{4}$/.test(term)) return "year";
   if (/^\d/.test(term)) return "number";
@@ -182,36 +213,84 @@ function detectEntityType(term) {
 }
 
 function extractProperNouns(text) {
-  const matches = text.match(/\b[A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,}){0,3}/g) || [];
-  return [...new Set(matches.filter(m => !STOP.has(m.toLowerCase()) && m.length > 3))];
+  // Group consecutive PROPN tokens into noun phrases using wink-nlp POS tags
+  const doc = wink.readDoc(text);
+  const phrases = [];
+  let cur = [];
+  doc.tokens().each(t => {
+    if (t.out(its.pos) === 'PROPN') {
+      cur.push(t.out(its.value));
+    } else {
+      if (cur.length) { phrases.push(cleanNlpToken(cur.join(' '))); cur = []; }
+    }
+  });
+  if (cur.length) phrases.push(cleanNlpToken(cur.join(' ')));
+  const named = phrases.filter(t => t.length > 3 && !STOP.has(t.toLowerCase()));
+  const capFallback = (text.match(/\b[A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,}){0,3}/g) || [])
+    .filter(m => !STOP.has(m.toLowerCase()) && m.length > 3);
+  return [...new Set([...named, ...capFallback])];
 }
 
 function extractKeyTerm(sentence, tfidfScores) {
   const afterVerb = sentence.match(/\b(?:is|are|was|were|called|known as|defined as|refers to)\s+(?:a |an |the )?([A-Za-z][A-Za-z]+(?:\s+[A-Za-z]+){0,2})/);
-  if (afterVerb && afterVerb[1].length >= 3 && !STOP.has(afterVerb[1].toLowerCase())) return afterVerb[1];
-  const multiWordProper = sentence.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}/g) || [];
-  if (multiWordProper.length) return multiWordProper[0];
-  const singleProper = sentence.match(/\b[A-Z][a-z]{3,}\b/g) || [];
-  const filteredProper = singleProper.filter(w => !STOP.has(w.toLowerCase()));
-  if (filteredProper.length) {
-    const scored = filteredProper.map(w => ({ w, s: tfidfScores[w.toLowerCase()] || 0 })).sort((a, b) => b.s - a.s);
-    if (scored[0].s > 0) return scored[0].w;
-    return filteredProper[0];
+  if (afterVerb) {
+    let term = afterVerb[1].trim();
+    // For lowercase-starting terms (common nouns), keep only the first word to avoid "impressed by the"
+    if (/^[a-z]/.test(term)) term = term.split(/\s+/)[0];
+    if (term.length >= 3 && !STOP.has(term.toLowerCase())) return term;
+  }
+  // Use wink-nlp PROPN tags to find proper noun phrases, preferring non-subject terms
+  const subjectGuess = sentence.match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\s+/)?.[1] || '';
+  const wdoc = wink.readDoc(sentence);
+  const allProper = [];
+  let wphrCur = [];
+  wdoc.tokens().each(t => {
+    if (t.out(its.pos) === 'PROPN') {
+      wphrCur.push(t.out(its.value));
+    } else {
+      if (wphrCur.length) {
+        const p = cleanNlpToken(wphrCur.join(' '));
+        if (p.length > 2 && !STOP.has(p.toLowerCase())) allProper.push(p);
+        wphrCur = [];
+      }
+    }
+  });
+  if (wphrCur.length) {
+    const p = cleanNlpToken(wphrCur.join(' '));
+    if (p.length > 2 && !STOP.has(p.toLowerCase())) allProper.push(p);
+  }
+  const nonSubject = allProper.filter(t => t !== subjectGuess);
+  const properPool = nonSubject.length ? nonSubject : allProper;
+  if (properPool.length) {
+    const scored = properPool.map(w => ({ w, s: tfidfScores[w.toLowerCase()] || 0 })).sort((a, b) => b.s - a.s);
+    return scored[0].w;
   }
   const num = sentence.match(/\b\d[\d,]*(?:\.\d+)?(?:\s*(?:million|billion|thousand|percent|%|km|kg|m\b))?\b/i);
   if (num) return num[0];
   return null;
 }
 
+const VAGUE_SUBJECT = /^\b(one|some|this|that|any|many|such|another|other|each|every|various|it|there|here|the\s+following)\b/i;
+
 // ── Definition Detection ──────────────────────────────────────────────────────
+// Trim a definition string to the first natural clause boundary (max 8 words)
+// so MCQ answer choices don't span multiple lines.
+function trimDefinition(def) {
+  // Cut at clause-separating comma/semicolon followed by a connective or capital
+  const clauseEnd = def.search(/[,;]\s+(?:and|or|but|which|that|where|when|although|while|though|however|including|such as|especially|particularly|notably)/i);
+  if (clauseEnd >= 20) return def.slice(0, clauseEnd).trim();
+  const words = def.split(" ");
+  return words.length > 9 ? words.slice(0, 9).join(" ") : def;
+}
+
 function extractDefinition(sentence) {
   const defMatch = sentence.match(
     /^([A-Z][A-Za-z\s]{1,40}?)\s+(?:is|are|was|were|refers to|is defined as|is known as)\s+(?:a |an |the )?(.{10,})/
   );
   if (defMatch) {
     const subject = defMatch[1].trim();
-    const definition = defMatch[2].replace(/[.!?]+$/, "").trim();
-    if (subject.split(" ").length <= 5 && definition.split(" ").length >= 3) return { subject, definition };
+    const definition = trimDefinition(defMatch[2].replace(/[.!?]+$/, "").trim());
+    if (subject.split(" ").length <= 5 && definition.split(" ").length >= 3 && !VAGUE_SUBJECT.test(subject)) return { subject, definition };
   }
   // "X is the term/name/word for Y" — encyclopedic definition pattern
   const termForMatch = sentence.match(
@@ -219,7 +298,7 @@ function extractDefinition(sentence) {
   );
   if (termForMatch) {
     const subject = termForMatch[1].trim();
-    const definition = termForMatch[2].replace(/[.!?]+$/, "").trim();
+    const definition = trimDefinition(termForMatch[2].replace(/[.!?]+$/, "").trim());
     if (subject.split(" ").length <= 4 && definition.split(" ").length >= 3) return { subject, definition };
   }
   return null;
@@ -284,14 +363,135 @@ function extractComparison(sentence) {
     const other = compM[3].trim().replace(/[.!?,]+$/, "");
     return { question: `What is ${comparative} than ${other}?`, answer: subject };
   }
-  // "Unlike X, Y..." → "How does Y differ from X?"
+  // "Unlike X, Y..." → "What is contrasted with X?" (answer = Y, short proper noun)
   const unlikeM = sentence.match(/^Unlike\s+([A-Z][A-Za-z\s]{1,30}?),\s+([A-Z][A-Za-z\s]{1,30}?)\s+/);
   if (unlikeM) {
     const other = unlikeM[1].trim();
     const subject = unlikeM[2].trim();
-    return { question: `How does ${subject} differ from ${other}?`, answer: sentence.replace(/[.!?]+$/, "") };
+    return { question: `What is contrasted with ${other} in the passage?`, answer: subject };
   }
   return null;
+}
+
+// ── NLP-based wh-question fallback (wink-nlp) ────────────────────────────────
+// Fires when all regex patterns in toWhQuestion fail. Uses wink-nlp POS tagging
+// + lemmatization to handle any action verb without a hardcoded list.
+const SKIP_VERB_BASE = /^(be|is|are|was|were|have|has|had|do|does|did|will|would|could|should|may|might|shall|can|seem|appear|become|remain|feel|look|sound|get|stay|turn|go|come|keep|let|make|help|know|think|say|tell|want|need|see|find|give|take|use|show|call|try|ask|work|move|live|die|stand|fall|hold|grow|send|meet|lead|read|lose|spend|run|start|end|begin|stop|change|follow|include|contain|involve|require|allow|support|provide)$/;
+
+function toWhQuestionNlp(sentence) {
+  // Subject must be a proper noun sequence at the sentence start
+  const subjectM = sentence.match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\s+/);
+  if (!subjectM) return null;
+  const subject = subjectM[1].trim();
+  if (subject.length < 2 || STOP.has(subject.toLowerCase())) return null;
+
+  const rest = sentence.slice(subject.length).trim();
+  // Find the first VERB token and get its lemma via wink-nlp
+  const rdoc = wink.readDoc(rest);
+  let verbText = null, verbLemma = null;
+  rdoc.tokens().each(t => {
+    if (!verbText && t.out(its.pos) === 'VERB') {
+      verbText = t.out(its.value);
+      verbLemma = t.out(its.lemma) || verbText;
+    }
+  });
+  if (!verbText) return null;
+  if (SKIP_VERB_BASE.test(verbLemma.toLowerCase())) return null;
+
+  const verbIdx = rest.indexOf(verbText);
+  const afterVerb = rest.slice(verbIdx + verbText.length).trim().replace(/[.!?]+$/, '');
+  if (!afterVerb || afterVerb.length < 3) return null;
+
+  const obj = afterVerb
+    .replace(/\s+(?:in|at|on|by|from|to|with|during|after|before|for|into|upon|within|toward|under|over|around|against|along|behind|beyond|near|since|until|through)\s+.*/i, '')
+    .replace(/\s+\d{4}\b.*/, '')
+    .replace(/[,;:.!?]+$/, '')
+    .replace(/^(the|a|an)\s+/i, '')
+    .trim();
+
+  if (!obj || obj.length < 3 || STOP.has(obj.toLowerCase())) return null;
+  if (GENERIC_BLANK_WORDS.has(obj.toLowerCase())) return null;
+  if (obj.split(' ').length > 7) return null;
+
+  const question = `What did ${subject} ${verbLemma}?`;
+  if (!questionOk(question)) return null;
+  return { question, answer: obj, type: 'noun' };
+}
+
+// ── spaCy dependency parse → questions (Python backend) ──────────────────────
+async function parseWithSpacy(sentences) {
+  const backendUrl = process.env.REACT_APP_BACKEND_URL;
+  if (!backendUrl) return [];
+  try {
+    const res = await fetch(`${backendUrl}/parse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sentences }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined,
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.results) ? data.results : [];
+  } catch { return []; }
+}
+
+function makeDepParseQuestion(parseResult) {
+  const { sentence, tokens } = parseResult;
+  const root = tokens.find(t => t.dep === 'ROOT' && t.pos === 'VERB');
+  if (!root || SKIP_VERB_BASE.test(root.lemma.toLowerCase())) return null;
+
+  // Passive: "X was founded by Y" → "Who founded X?"
+  const passSubj = tokens.find(t => t.dep === 'nsubjpass' && t.head === root.i);
+  if (passSubj) {
+    const agentPrep = tokens.find(t => t.dep === 'agent' && t.head === root.i);
+    const agent = agentPrep ? tokens.find(t => t.dep === 'pobj' && t.head === agentPrep.i) : null;
+    if (agent && !STOP.has(agent.text.toLowerCase())) {
+      const agentPhrase = tokens
+        .filter(t => t.head === agent.i && t.dep === 'compound')
+        .concat(agent).sort((a, b) => a.i - b.i).map(t => t.text).join(' ');
+      const q = `Who ${root.lemma}d ${passSubj.text}?`;
+      if (!questionOk(q)) return null;
+      return { question: q, answer: agentPhrase, type: 'person', sentence };
+    }
+    return null;
+  }
+
+  // Active: "Marie Curie discovered radioactivity" → "What did Marie Curie discover?"
+  const subj = tokens.find(t => t.dep === 'nsubj' && t.head === root.i);
+  if (!subj || STOP.has(subj.text.toLowerCase())) return null;
+  const dobj = tokens.find(t => (t.dep === 'dobj' || t.dep === 'obj') && t.head === root.i);
+  if (!dobj || STOP.has(dobj.text.toLowerCase()) || GENERIC_BLANK_WORDS.has(dobj.text.toLowerCase())) return null;
+
+  const build = head => tokens
+    .filter(t => t.head === head.i && (t.dep === 'compound' || t.dep === 'amod'))
+    .concat(head).sort((a, b) => a.i - b.i).map(t => t.text).join(' ');
+
+  const subjPhrase = build(subj);
+  const objPhrase = build(dobj).replace(/^(the|a|an)\s+/i, '').trim();
+  if (!objPhrase || objPhrase.length < 3 || objPhrase.split(' ').length > 6) return null;
+  if (GENERIC_BLANK_WORDS.has(objPhrase.toLowerCase())) return null;
+
+  const q = `What did ${subjPhrase} ${root.lemma}?`;
+  if (!questionOk(q)) return null;
+  return { question: q, answer: objPhrase, type: 'noun', sentence };
+}
+
+function makeDepParseQuestions(parseResults, allTerms, usedSentences) {
+  const out = [];
+  for (const result of parseResults) {
+    const q = makeDepParseQuestion(result);
+    if (!q || usedSentences.has(q.sentence)) continue;
+    const sTerms = extractProperNouns(q.sentence);
+    const distractors = getDistractors(q.answer, allTerms, q.type, sTerms);
+    usedSentences.add(q.sentence);
+    if (distractors.length >= 3) {
+      const choices = shuffle([q.answer, ...distractors.slice(0, 3)]);
+      out.push({ type: 'mcq', question: q.question, choices, answer: choices.indexOf(q.answer), difficulty: 'medium', explanation: `From source: "${q.sentence}"` });
+    } else {
+      out.push({ type: 'fill', question: q.question, answer: q.answer, difficulty: 'medium', explanation: `From source: "${q.sentence}"` });
+    }
+  }
+  return out;
 }
 
 // ── Wh-question generation ────────────────────────────────────────────────────
@@ -302,7 +502,7 @@ function toWhQuestion(sentence) {
     return { question: `Who ${rest.replace(/[.!?]+$/, "")}?`, answer: personSubject[1], type: "person" };
   }
   // "X founded/invented/created/built/wrote/developed [proper-noun object]"
-  const actionMatch = sentence.match(/^([A-Z][A-Za-z\s]{2,35}?)\s+(founded|invented|created|built|wrote|developed|established|introduced|designed|discovered)\s+(?:the\s+|a\s+|an\s+)?([A-Z][A-Za-z\s]{2,40})/);
+  const actionMatch = sentence.match(/^([A-Z][A-Za-z\s]{2,35}?)\s+(founded|invented|created|built|wrote|developed|established|introduced|designed|discovered|published|directed|composed|painted|sculpted|passed|signed|ratified|defeated|conquered|captured|elected|appointed|awarded|named|proposed|formulated|coined|solved|produced|launched|formed|organized)\s+(?:the\s+|a\s+|an\s+)?([A-Z][A-Za-z\s]{2,40})/);
   if (actionMatch) {
     const subject = actionMatch[1].trim();
     const verb = actionMatch[2].toLowerCase();
@@ -311,9 +511,46 @@ function toWhQuestion(sentence) {
       return { question: `What did ${subject} ${verb}?`, answer: obj, type: "noun" };
     }
   }
+  // Passive: "X was/were [action] by Y" → "Who [actioned] X?"
+  const passiveByMatch = sentence.match(/^([A-Z][A-Za-z\s,]{2,60}?)\s+(?:was|were)\s+(founded|invented|created|written|built|established|designed|discovered|introduced|developed|passed|enacted|signed|ratified|published|released|produced|directed|composed|painted|sculpted|elected|appointed|defeated|conquered|captured|led|commanded|awarded|granted|named|called|described|defined|coined|proposed|formulated|solved)\s+by\s+([A-Z][A-Za-z\s]{2,40})/);
+  if (passiveByMatch) {
+    const obj = passiveByMatch[1].trim();
+    const verb = passiveByMatch[2].toLowerCase();
+    const agent = passiveByMatch[3].trim().replace(/[.!?,]+$/, "");
+    if (agent.length >= 3 && obj.split(" ").length <= 6) {
+      return { question: `Who ${verb} ${obj}?`, answer: agent, type: "person" };
+    }
+  }
+  // Appositive: "Darwin, a British naturalist, ..." → "What was Darwin?"
+  const appositiveMatch = sentence.match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2}),\s+(?:a|an)\s+([A-Za-z][A-Za-z\s]{3,50}?),\s+/);
+  if (appositiveMatch) {
+    const subject = appositiveMatch[1].trim();
+    const description = appositiveMatch[2].trim();
+    const wc = description.split(" ").length;
+    if (wc >= 1 && wc <= 6 && !STOP.has(description.split(" ").at(-1).toLowerCase())) {
+      return { question: `What was ${subject}?`, answer: description, type: "noun" };
+    }
+  }
+  // Acronym expansion: "ATP (adenosine triphosphate)" → "What does ATP stand for?"
+  const acronymMatch = sentence.match(/\b([A-Z]{2,6})\s+\(([A-Za-z][A-Za-z\s-]{4,50})\)/);
+  if (acronymMatch) {
+    return { question: `What does ${acronymMatch[1]} stand for?`, answer: acronymMatch[2].trim(), type: "noun" };
+  }
+  // "Known for": "Mozart is known for his piano concertos" → "What is Mozart known for?"
+  const knownForMatch = sentence.match(/^([A-Z][A-Za-z\s]{2,40}?)\s+(?:is|was|are|were)\s+(?:best\s+)?known\s+for\s+(.{8,80})/);
+  if (knownForMatch) {
+    const subject = knownForMatch[1].trim();
+    const reason = knownForMatch[2].replace(/[.!?,]+$/, "").trim();
+    const wc = reason.split(" ").length;
+    if (wc >= 2 && wc <= 8) {
+      return { question: `What is ${subject} known for?`, answer: reason, type: "noun" };
+    }
+  }
   const yearMatch = sentence.match(/\b(in\s+)?(\d{4})\b/);
   if (yearMatch) {
-    const replacement = yearMatch[1] ? "in what year" : "what year";
+    const before = sentence.slice(0, sentence.indexOf(yearMatch[0]));
+    const monthPrecedes = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{0,2}\s*$/.test(before);
+    const replacement = yearMatch[1] ? "in what year" : monthPrecedes ? "of what year" : "what year";
     const q = sentence.replace(yearMatch[0], replacement).replace(/[.!?]+$/, "");
     return { question: q.charAt(0).toUpperCase() + q.slice(1) + "?", answer: yearMatch[2], type: "year" };
   }
@@ -331,7 +568,8 @@ function toWhQuestion(sentence) {
     const q = sentence.replace(numMatch[1], "how many").replace(/[.!?]+$/, "");
     return { question: q.charAt(0).toUpperCase() + q.slice(1) + "?", answer: numMatch[1], type: "number" };
   }
-  return null;
+  // NLP fallback: handles any action verb with a proper-noun subject
+  return toWhQuestionNlp(sentence);
 }
 
 // ── Smart distractor generation ───────────────────────────────────────────────
@@ -362,6 +600,12 @@ function getDistractors(answer, allTerms, type, sentenceTerms = []) {
     if (places.length >= 3) return shuffle(places).slice(0, 3);
   }
   if (sameS.length >= 3) return shuffle(sameS).slice(0, 3);
+  // Type-matched fallback: prefer same entity type before falling back to anything
+  const targetType = detectEntityType(answer);
+  if (targetType !== "noun") {
+    const sameType = allTerms.filter(t => t !== answer && t.length > 2 && detectEntityType(t) === targetType);
+    if (sameType.length >= 3) return shuffle(sameType).slice(0, 3);
+  }
   return shuffle(allTerms.filter(t => t !== answer && t.length > 2)).slice(0, 3);
 }
 
@@ -395,6 +639,20 @@ function negateSentence(sentence, allEntities) {
   return null;
 }
 
+// ── Embedded-clause stripper ─────────────────────────────────────────────────
+// Removes non-restrictive relative/participial clauses surrounded by commas so
+// that the main subject+verb lands adjacent, letting toWhQuestion match more sentences.
+// E.g. "Napoleon, who was born in Corsica, became Emperor" → "Napoleon became Emperor"
+function stripEmbeddedClauses(s) {
+  return s
+    .replace(/,\s+who\s+[^,]{5,80},\s+/g, ' ')
+    .replace(/,\s+which\s+[^,]{5,80},\s+/g, ' ')
+    .replace(/,\s+a\s+[^,]{5,60},\s+/g, ' ')    // appositive: "Darwin, a naturalist, ..."
+    .replace(/,\s+an\s+[^,]{5,60},\s+/g, ' ')
+    .replace(/,\s+the\s+[^,]{5,60},\s+/g, ' ')
+    .replace(/\s{2,}/g, ' ').trim();
+}
+
 // ── Answer trimmer ────────────────────────────────────────────────────────────
 function trimAnswer(text, maxLen = 80) {
   if (text.length <= maxLen) return text;
@@ -402,7 +660,33 @@ function trimAnswer(text, maxLen = 80) {
 }
 
 function questionOk(q) {
-  return typeof q === "string" && q.length >= 10 && q.length <= 250;
+  if (typeof q !== "string" || q.length < 10 || q.length > 250) return false;
+  if (/\b(undefined|null)\b/.test(q)) return false;
+  if (/^[a-z]/.test(q)) return false;
+  return true;
+}
+
+// ── Diversity-aware question picker ──────────────────────────────────────────
+// Round-robins across question types so the final quiz isn't a run of same-type questions.
+function interleavedPick(pool, count) {
+  if (pool.length <= count) return pool;
+  const byType = {};
+  for (const q of shuffle(pool)) {
+    (byType[q.type] = byType[q.type] || []).push(q);
+  }
+  const types = shuffle(Object.keys(byType));
+  const out = [];
+  let round = 0;
+  while (out.length < count) {
+    let anyLeft = false;
+    for (const t of types) {
+      if (out.length >= count) break;
+      if (round < byType[t].length) { out.push(byType[t][round]); anyLeft = true; }
+    }
+    if (!anyLeft) break;
+    round++;
+  }
+  return out;
 }
 
 // ── Shuffle ───────────────────────────────────────────────────────────────────
@@ -436,7 +720,8 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
-    const wh = toWhQuestion(s);
+    const sStripped = stripEmbeddedClauses(s);
+    const wh = toWhQuestion(s) || (sStripped !== s ? toWhQuestion(sStripped) : null);
     if (wh && questionOk(wh.question)) {
       usedSentences.add(s);
       out.push({ type: "fill", question: wh.question, answer: wh.answer, difficulty: "medium", explanation: `From source: "${s}"` });
@@ -467,7 +752,7 @@ async function negateWithDatamuse(sentence) {
   for (const { word, index, raw } of shuffle(candidates).slice(0, 3)) {
     try {
       const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-      const res = await fetch(`/api/datamuse?rel_ant=${encodeURIComponent(word)}&max=3`, { signal });
+      const res = await fetch(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`, { signal });
       if (!res.ok) continue;
       const data = await res.json();
       const ant = (Array.isArray(data) ? data : []).map(d => d.word).find(w => w && !w.includes(" "));
@@ -484,6 +769,8 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
   const NEGATION = /\b(not|never|no one|nobody|nothing|nowhere|neither|nor|without|lack|absence)\b/i;
   // Unresolved pronoun as subject — context-free, ambiguous as a standalone statement
   const BARE_PRONOUN_SUBJECT = /^(He|She|It|They)\b/;
+  // Mid-clause pronoun as main subject after a comma — e.g. "Like X, it was designed..."
+  const MID_CLAUSE_PRONOUN = /,\s+(it|he|she|they|them)\s+\b(was|is|were|are|had|has|did|could|would)\b/i;
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
@@ -492,6 +779,7 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
     if (Math.random() > 0.4) {
       if (NEGATION.test(s)) continue;
       if (BARE_PRONOUN_SUBJECT.test(s)) continue;
+      if (MID_CLAUSE_PRONOUN.test(s)) continue;
       usedSentences.add(s);
       out.push({ type: "tf", question: q, answer: "True", difficulty: "easy", explanation: "This statement appears directly in the source." });
     } else {
@@ -526,7 +814,8 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
       }
     }
 
-    const wh = toWhQuestion(s);
+    const sStripped = stripEmbeddedClauses(s);
+    const wh = toWhQuestion(s) || (sStripped !== s ? toWhQuestion(sStripped) : null);
     if (wh && questionOk(wh.question)) {
       let distractors = getDistractors(wh.answer, allTerms, wh.type, sTerms);
       // Datamuse fallback for common-word answers (non-proper-noun, non-number)
@@ -534,9 +823,9 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
         try {
           const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
           const [antRes, trgRes, synRes] = await Promise.all([
-            fetch(`/api/datamuse?rel_ant=${encodeURIComponent(wh.answer.toLowerCase())}&max=5`, { signal }),
-            fetch(`/api/datamuse?rel_trg=${encodeURIComponent(wh.answer.toLowerCase())}&max=8`, { signal }),
-            fetch(`/api/datamuse?rel_syn=${encodeURIComponent(wh.answer.toLowerCase())}&max=5`, { signal }),
+            fetch(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(wh.answer.toLowerCase())}&max=5`, { signal }),
+            fetch(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(wh.answer.toLowerCase())}&max=8`, { signal }),
+            fetch(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(wh.answer.toLowerCase())}&max=5`, { signal }),
           ]);
           const [antData, trgData, synData] = await Promise.all([antRes.ok ? antRes.json() : [], trgRes.ok ? trgRes.json() : [], synRes.ok ? synRes.json() : []]);
           const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== wh.answer.toLowerCase());
@@ -563,9 +852,9 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
       try {
         const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
         const [antRes, trgRes, synRes] = await Promise.all([
-          fetch(`/api/datamuse?rel_ant=${encodeURIComponent(answer.toLowerCase())}&max=5`, { signal }),
-          fetch(`/api/datamuse?rel_trg=${encodeURIComponent(answer.toLowerCase())}&max=8`, { signal }),
-          fetch(`/api/datamuse?rel_syn=${encodeURIComponent(answer.toLowerCase())}&max=5`, { signal }),
+          fetch(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(answer.toLowerCase())}&max=5`, { signal }),
+          fetch(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(answer.toLowerCase())}&max=8`, { signal }),
+          fetch(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(answer.toLowerCase())}&max=5`, { signal }),
         ]);
         const [antData, trgData, synData] = await Promise.all([antRes.ok ? antRes.json() : [], trgRes.ok ? trgRes.json() : [], synRes.ok ? synRes.json() : []]);
         const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== answer.toLowerCase());
@@ -706,9 +995,9 @@ async function fetchDatamuseDistractors(word, textPool) {
   try {
     const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
     const [antRes, trgRes, synRes] = await Promise.all([
-      fetch(`/api/datamuse?rel_ant=${encodeURIComponent(word)}&max=8`, { signal }),
-      fetch(`/api/datamuse?rel_trg=${encodeURIComponent(word)}&max=12`, { signal }),
-      fetch(`/api/datamuse?rel_syn=${encodeURIComponent(word)}&max=8`, { signal }),
+      fetch(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=8`, { signal }),
+      fetch(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(word)}&max=12`, { signal }),
+      fetch(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(word)}&max=8`, { signal }),
     ]);
     const [antData, trgData, synData] = await Promise.all([
       antRes.ok ? antRes.json() : Promise.resolve([]),
@@ -840,7 +1129,7 @@ async function makeErrorId(sentences, count, usedSentences) {
     for (const { word, index, raw } of shuffle(candidates).slice(0, 4)) {
       try {
         const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-        const res = await fetch(`/api/datamuse?rel_ant=${encodeURIComponent(word)}&max=3`, { signal });
+        const res = await fetch(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`, { signal });
         if (!res.ok) continue;
         const data = await res.json();
         const ant = data.map(d => d.word).find(w => w && !w.includes(" "));
@@ -1209,16 +1498,28 @@ function makeListQuestion(sentences, count, allTerms, usedSentences) {
   return out;
 }
 
+const MONTHS_SET = new Set(["january","february","march","april","may","june","july","august","september","october","november","december"]);
+
 // ── Named-entity co-occurrence questions ──────────────────────────────────────
-function makeCooccurrence(sentences, count, usedSentences) {
+function makeCooccurrence(sentences, count, allTerms, usedSentences) {
   const out = [];
+
+  // Build a set of all proper noun name fragments (lowercase) to exclude from concept pool
+  const properLower = new Set(allTerms.flatMap(t => t.toLowerCase().split(/\s+/)));
 
   // Count how often each (entity, concept) pair appears in the same sentence
   const coCount = {};
   for (const s of sentences) {
-    const entities = extractProperNouns(s);
+    // Exclude months and single-word entities (months, ambiguous single caps)
+    const entities = extractProperNouns(s).filter(e => {
+      const low = e.toLowerCase();
+      if (MONTHS_SET.has(low)) return false;
+      if (STOP.has(low)) return false;
+      // Require at least 2 words OR be a clearly non-month multi-char word
+      return e.includes(" ") || e.length >= 5;
+    });
     const concepts = (s.toLowerCase().match(/\b[a-z]{5,}\b/g) || [])
-      .filter(w => !STOP.has(w) && !GENERIC_BLANK_WORDS.has(w));
+      .filter(w => !STOP.has(w) && !GENERIC_BLANK_WORDS.has(w) && !MONTHS_SET.has(w) && !properLower.has(w));
     for (const entity of entities) {
       for (const concept of [...new Set(concepts)]) {
         const key = `${entity}|||${concept}`;
@@ -1308,6 +1609,143 @@ async function fetchEmbeddings(sentences) {
   }
 }
 
+// ── "NOT stated in the passage" questions ────────────────────────────────────
+// Generates a false statement via entity/year swap, then uses 3 true sentences
+// as distractors. Correct answer = the false one.
+function makeNotTrue(sentences, count, allTerms, usedSentences) {
+  const out = [];
+  for (const s of shuffle(sentences)) {
+    if (out.length >= count) break;
+    if (usedSentences.has(s)) continue;
+    if (!questionOk(s.replace(/[.!?]+$/, ""))) continue;
+    const falseVer = negateSentence(s, allTerms);
+    if (!falseVer || falseVer === s) continue;
+    const falseText = falseVer.replace(/[.!?]+$/, "").slice(0, 110);
+    // Three true sentences as distractors (trimmed for display)
+    const trues = shuffle(sentences.filter(x => x !== s && !usedSentences.has(x)))
+      .slice(0, 3)
+      .map(x => x.replace(/[.!?]+$/, "").slice(0, 110));
+    if (trues.length < 3) continue;
+    const choices = shuffle([falseText, ...trues]);
+    const answer = choices.indexOf(falseText);
+    if (answer === -1) continue;
+    usedSentences.add(s);
+    out.push({
+      type: "mcq",
+      question: "Which of the following is NOT stated in the passage?",
+      choices,
+      answer,
+      difficulty: "hard",
+      explanation: `The false statement is a modified version of: "${s}"`,
+    });
+  }
+  return out;
+}
+
+// ── ConceptNet semantic questions ─────────────────────────────────────────────
+const CN_REL = {
+  "/r/IsA":         w => `What type of thing is ${w}?`,
+  "/r/UsedFor":     w => `What is ${w} used for?`,
+  "/r/HasProperty": w => `What is a property of ${w}?`,
+  "/r/CapableOf":   w => `What can ${w} do?`,
+  "/r/PartOf":      w => `What is ${w} a part of?`,
+  "/r/Causes":      w => `What can ${w} cause?`,
+  "/r/MadeOf":      w => `What is ${w} made of?`,
+};
+
+async function makeConceptNetQuestion(sentences, count, tfidfScores, allTerms, usedSentences) {
+  const out = [];
+
+  // Pick top TF-IDF terms (noun-like: 4+ chars, no stop words, not all-caps acronym)
+  const topTerms = Object.entries(tfidfScores)
+    .filter(([w]) => w.length >= 4 && !STOP.has(w) && !GENERIC_BLANK_WORDS.has(w) && !/^[A-Z]{2,}$/.test(w))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([w]) => w);
+
+  if (!topTerms.length) return out;
+
+  // Fetch all terms in parallel
+  const fetchResults = await Promise.all(topTerms.map(async term => {
+    try {
+      const res = await fetch(`/api/lookup?service=conceptnet&concept=${encodeURIComponent(term)}&limit=20`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return { term, edges: data.edges || [] };
+    } catch { return null; }
+  }));
+
+  // Build relation → [end labels] map across all terms for cross-concept distractors
+  const relPool = {}; // relId → Set<string>
+  for (const result of fetchResults) {
+    if (!result) continue;
+    for (const edge of result.edges) {
+      const relId = edge.rel?.["@id"];
+      if (!CN_REL[relId]) continue;
+      const startLang = edge.start?.["@id"]?.startsWith("/c/en/") ?? true;
+      const endLang = edge.end?.["@id"]?.startsWith("/c/en/") ?? true;
+      if (!startLang || !endLang) continue;
+      const endLabel = (edge.end?.label || "").toLowerCase().trim();
+      if (!endLabel || endLabel.split(" ").length > 4 || STOP.has(endLabel)) continue;
+      if (!relPool[relId]) relPool[relId] = new Set();
+      relPool[relId].add(endLabel);
+    }
+  }
+
+  for (const result of shuffle(fetchResults)) {
+    if (out.length >= count) break;
+    if (!result) continue;
+    const { term, edges } = result;
+
+    // Require at least one sentence mentioning this term
+    const src = sentences.find(s => !usedSentences.has(s) && s.toLowerCase().includes(term));
+    if (!src) continue;
+
+    // Find the best forward edge (term is the start, edge is in CN_REL, weight ≥ 1)
+    const candidates = edges
+      .filter(e => {
+        const relId = e.rel?.["@id"];
+        if (!CN_REL[relId]) return false;
+        const startLabel = (e.start?.label || "").toLowerCase().replace(/_/g, " ");
+        if (startLabel !== term) return false;
+        if (!e.start?.["@id"]?.startsWith("/c/en/")) return false;
+        if (!e.end?.["@id"]?.startsWith("/c/en/")) return false;
+        const endLabel = (e.end?.label || "").toLowerCase();
+        if (!endLabel || endLabel === term || STOP.has(endLabel)) return false;
+        if (endLabel.split(" ").length > 4) return false;
+        return (e.weight || 0) >= 1.0;
+      })
+      .sort((a, b) => (b.weight || 0) - (a.weight || 0));
+
+    if (!candidates.length) continue;
+    const edge = candidates[0];
+    const relId = edge.rel["@id"];
+    const answer = edge.end.label.toLowerCase();
+    const questionText = CN_REL[relId](term);
+
+    // Build distractors from same-relation pool, excluding the answer
+    const pool = [...(relPool[relId] || [])].filter(w => w !== answer);
+    if (pool.length < 3) continue;
+
+    const cap = w => w.charAt(0).toUpperCase() + w.slice(1);
+    const distractors = shuffle(pool).slice(0, 3).map(cap);
+    const answerCapped = cap(answer);
+    const choices = shuffle([answerCapped, ...distractors]);
+
+    usedSentences.add(src);
+    out.push({
+      type: "mcq",
+      question: questionText,
+      choices,
+      answer: choices.indexOf(answerCapped),
+      difficulty: "medium",
+      explanation: `Based on ConceptNet: "${term}" — ${edge.rel.label} — "${answer}". Found in: "${src}"`,
+    });
+  }
+
+  return out;
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   if (text.length > 50000) text = text.slice(0, 50000);
@@ -1322,9 +1760,12 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   // TextRank: graph-based sentence ranking as fallback (more reliable than raw TF-IDF order)
   let ranked = textRank(sentences);
 
-  // Neural re-ranking: if embeddings available, override TextRank with semantic centrality
+  // Neural re-ranking + spaCy dep parse run in parallel
   const batch = ranked.slice(0, 40);
-  const embeddings = await fetchEmbeddings(batch);
+  const [embeddings, parseResults] = await Promise.all([
+    fetchEmbeddings(batch),
+    parseWithSpacy(ranked.slice(0, 20)),
+  ]);
   if (embeddings) {
     const centroid = computeCentroid(embeddings);
     const neuralScored = batch.map((s, i) => ({ s, score: cosineSimilarity(embeddings[i], centroid) }));
@@ -1333,9 +1774,19 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   }
 
   let qs;
-  if (qType === "fill") qs = makeFill(ranked, numQ, tfidfScores, usedSentences);
+  if (qType === "fill") {
+    const depUsed = new Set();
+    const depQs = makeDepParseQuestions(parseResults, allTerms, depUsed);
+    [...depUsed].forEach(s => usedSentences.add(s));
+    qs = shuffle([...depQs, ...makeFill(ranked, numQ, tfidfScores, usedSentences)]).slice(0, numQ);
+  }
   else if (qType === "tf") qs = await makeTF(ranked, numQ, allTerms, usedSentences);
-  else if (qType === "mcq") qs = await makeMCQ(ranked, numQ, tfidfScores, allTerms, usedSentences);
+  else if (qType === "mcq") {
+    const depUsed = new Set();
+    const depQs = makeDepParseQuestions(parseResults, allTerms, depUsed).filter(q => q.type === 'mcq');
+    [...depUsed].forEach(s => usedSentences.add(s));
+    qs = shuffle([...depQs, ...await makeMCQ(ranked, numQ, tfidfScores, allTerms, usedSentences)]).slice(0, numQ);
+  }
   else if (qType === "double_fill") qs = makeDoubleFill(ranked, numQ, tfidfScores, allTerms, usedSentences);
   else if (qType === "ordering") qs = makeOrdering(sentencesOrdered, numQ, usedSentences);
   else if (qType === "error_id") qs = await makeErrorId(ranked, numQ, usedSentences);
@@ -1343,18 +1794,23 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     // Mixed: generate from all types, shuffle, take numQ
     const q = Math.ceil(numQ / 3);
     // Each parallel function gets its own usedSentences to prevent mid-await races
-    const used1 = new Set(), used2 = new Set(), used3 = new Set(), used4 = new Set();
-    const [tfQs, vocabQs, mcqQs, errorQs] = await Promise.all([
+    const used1 = new Set(), used2 = new Set(), used3 = new Set(), used4 = new Set(), used5 = new Set();
+    const [tfQs, vocabQs, mcqQs, errorQs, cnQs] = await Promise.all([
       makeTF(ranked, q, allTerms, used1),
       makeVocabContext(ranked, q, tfidfScores, allTerms, used2),
       makeMCQ(ranked, q, tfidfScores, allTerms, used3),
       makeErrorId(ranked, Math.ceil(q / 2), used4),
+      makeConceptNetQuestion(ranked, Math.ceil(q / 2), tfidfScores, allTerms, used5),
     ]);
     // Merge into shared set so sequential builders below don't reuse these sentences
-    [...used1, ...used2, ...used3, ...used4].forEach(s => usedSentences.add(s));
+    [...used1, ...used2, ...used3, ...used4, ...used5].forEach(s => usedSentences.add(s));
+    const depUsed = new Set();
+    const depQs = makeDepParseQuestions(parseResults, allTerms, depUsed);
+    [...depUsed].forEach(s => usedSentences.add(s));
     const pool = shuffle([
       ...mcqQs,
       ...tfQs,
+      ...depQs,
       ...makeFill(ranked, q, tfidfScores, usedSentences),
       ...makeCauseEffect(ranked, q, usedSentences),
       ...makeSequence(ranked, q, usedSentences),
@@ -1364,14 +1820,26 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
       ...makeMainIdea(ranked, usedSentences),
       ...makeSuperlative(ranked, q, usedSentences),
       ...makeListQuestion(ranked, q, allTerms, usedSentences),
-      ...makeCooccurrence(ranked, Math.ceil(q / 2), usedSentences),
+      ...makeCooccurrence(ranked, Math.ceil(q / 2), allTerms, usedSentences),
       ...makeQuantityQuestion(ranked, q, usedSentences),
       ...makeTimeline(ranked, Math.ceil(q / 2), usedSentences),
       ...makeContrast(ranked, q, allTerms, usedSentences),
       ...vocabQs,
       ...errorQs,
+      ...cnQs,
+      ...makeNotTrue(ranked, Math.ceil(q / 3), allTerms, usedSentences),
     ]);
-    qs = pool.slice(0, numQ);
+    // Soft cap: KWIC-blank questions ("Choose the correct answer: / Fill in the blank:")
+    // are the lowest-quality format — limit them to at most 35% of the target count.
+    const kwicCap = Math.ceil(numQ * 0.35);
+    let kwicSeen = 0;
+    const cappedPool = pool.filter(q => {
+      if (/^(Choose the correct answer|Fill in the blank):/.test(q.question)) {
+        return kwicSeen++ < kwicCap;
+      }
+      return true;
+    });
+    qs = interleavedPick(cappedPool, numQ);
   }
   if (!qs.length) throw new Error("Could not extract enough questions. Try a source with more complete sentences.");
 
@@ -1382,6 +1850,15 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     const key = String(answerStr).toLowerCase().trim();
     if (!key || usedAnswerKeys.has(key)) return false;
     usedAnswerKeys.add(key);
+    return true;
+  });
+
+  // Deduplicate by question stem — prevents near-identical question wording even with different answers
+  const usedStemKeys = new Set();
+  qs = qs.filter(q => {
+    const stem = q.question.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").slice(0, 60).trim();
+    if (usedStemKeys.has(stem)) return false;
+    usedStemKeys.add(stem);
     return true;
   });
 

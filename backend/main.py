@@ -5,6 +5,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from deep_translator import GoogleTranslator
 
+_nlp_en = None
+def get_nlp():
+    global _nlp_en
+    if _nlp_en is None:
+        import spacy
+        _nlp_en = spacy.load("en_core_web_sm")
+    return _nlp_en
+
 app = FastAPI()
 
 app.add_middleware(
@@ -31,6 +39,10 @@ class InjectionRequest(BaseModel):
     text: str
 
 
+class ParseRequest(BaseModel):
+    sentences: list[str]
+
+
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"status": "ok"}
@@ -54,6 +66,28 @@ async def translate(req: TranslateRequest):
             translations.append(text)
 
     return {"translations": translations}
+
+
+@app.post("/parse")
+async def parse_sentences(req: ParseRequest):
+    nlp = get_nlp()
+    results = []
+    for sentence in req.sentences[:20]:
+        doc = nlp(sentence[:400])
+        tokens = [
+            {
+                "i": tok.i,
+                "text": tok.text,
+                "lemma": tok.lemma_,
+                "pos": tok.pos_,
+                "dep": tok.dep_,
+                "head": tok.head.i,
+                "is_stop": tok.is_stop,
+            }
+            for tok in doc
+        ]
+        results.append({"sentence": sentence, "tokens": tokens})
+    return {"results": results}
 
 
 @app.post("/check-injection")
