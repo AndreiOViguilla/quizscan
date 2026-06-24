@@ -8,7 +8,9 @@ const wink = winkNLP(model);
 const STOP = new Set(["the","a","an","is","are","was","were","be","been","being","have","has","had","do","does","did","will","would","could","should","may","might","shall","can","and","but","or","nor","so","yet","to","of","in","on","at","by","for","with","about","into","from","up","out","over","then","once","also","as","if","while","because","since","although","though","unless","until","when","where","who","which","that","this","these","those","i","you","he","she","it","we","they","me","him","her","us","them","my","your","his","its","our","their","what","how","all","each","every","some","any","few","more","most","other","such","not","no","only","own","same","than","too","very","just","both","either","neither"]);
 
 // Generic content words that make poor fill-in-the-blank targets
-const GENERIC_BLANK_WORDS = new Set(["used","made","came","took","went","said","told","knew","seen","given","called","known","found","many","much","even","part","form","type","kind","ways","time","times","year","years","place","area","world","people","person","thing","things","point","group","number","large","small","long","high","great","well","good","often","later","early","during","within","between","among","based","being","having","making","taking","using","getting","putting","coming","going","looking","working","following","including","different","important","significant","various","several","another","through","across","around","century","country","region","period","process","system","level","term","terms","role","fact","case","way","use","need","also","even","back","just","like","more","less","only","last","next","over","same","still","such","very","well"]);
+const GENERIC_BLANK_WORDS = new Set(["used","made","came","took","went","said","told","knew","seen","given","called","known","found","many","much","even","part","form","type","kind","ways","time","times","year","years","place","area","world","people","person","thing","things","point","group","number","large","small","long","high","great","well","good","often","later","early","during","within","between","among","based","being","having","making","taking","using","getting","putting","coming","going","looking","working","following","including","different","important","significant","various","several","another","through","across","around","century","country","region","period","process","system","level","term","terms","role","fact","case","way","use","need","also","even","back","just","like","more","less","only","last","next","over","same","still","such","very","well",
+  // Adverbs — grammatically obvious in context, trivially guessable as blanks
+  "always","never","usually","sometimes","rarely","often","frequently","generally","normally","typically","commonly","occasionally","regularly","certainly","definitely","probably","possibly","perhaps","maybe","likely","simply","merely","purely","mainly","mostly","nearly","almost","quite","rather","truly","really","deeply","highly","widely","largely","greatly","strongly","quickly","slowly","easily","clearly","finally","eventually","gradually","initially","originally","previously","already","yet","soon","then","now","once","twice","again","also","too","further","however","therefore","thus","hence","instead","otherwise","meanwhile","nevertheless","nonetheless","furthermore","additionally","consequently","accordingly","similarly","likewise","besides","moreover","anyway","elsewhere","everywhere","somewhere","anywhere","nowhere"]);
 
 // ── Text cleaning ─────────────────────────────────────────────────────────────
 function cleanText(raw) {
@@ -235,9 +237,13 @@ function extractKeyTerm(sentence, tfidfScores) {
   const afterVerb = sentence.match(/\b(?:is|are|was|were|called|known as|defined as|refers to)\s+(?:a |an |the )?([A-Za-z][A-Za-z]+(?:\s+[A-Za-z]+){0,2})/);
   if (afterVerb) {
     let term = afterVerb[1].trim();
-    // For lowercase-starting terms (common nouns), keep only the first word to avoid "impressed by the"
     if (/^[a-z]/.test(term)) term = term.split(/\s+/)[0];
-    if (term.length >= 3 && !STOP.has(term.toLowerCase())) return term;
+    if (term.length >= 3 && !STOP.has(term.toLowerCase()) && !GENERIC_BLANK_WORDS.has(term.toLowerCase())) {
+      // Use wink-nlp POS to reject adverbs — catches any adverb, not just the hardcoded list
+      let firstPos = null;
+      wink.readDoc(term).tokens().each(t => { if (!firstPos) firstPos = t.out(its.pos); });
+      if (firstPos !== 'ADV') return term;
+    }
   }
   // Use wink-nlp PROPN tags to find proper noun phrases, preferring non-subject terms
   const subjectGuess = sentence.match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\s+/)?.[1] || '';
@@ -727,6 +733,8 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
       out.push({ type: "fill", question: wh.question, answer: wh.answer, difficulty: "medium", explanation: `From source: "${s}"` });
       continue;
     }
+    // Skip sentences with embedded quotes for KWIC — they're from reviews/opinions, not facts
+    if (/"[^"]{5,}"/.test(s)) continue;
     const term = extractKeyTerm(s, tfidfScores);
     if (!term) continue;
     const kwic = makeKwicBlank(s, term);
@@ -839,6 +847,7 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
       continue;
     }
 
+    if (/"[^"]{5,}"/.test(s)) continue;
     const answer = extractKeyTerm(s, tfidfScores);
     if (!answer) continue;
     const kwic = makeKwicBlank(s, answer);
@@ -1299,7 +1308,14 @@ function makeTimeline(sentences, count, usedSentences) {
 
   if (events.length < 4) return out;
 
-  const shorten = s => s.length > 78 ? s.slice(0, 75) + "..." : s.replace(/[.!?]+$/, "");
+  const shorten = s => {
+    let t = s.replace(/[.!?]+$/, "");
+    // Strip leading "In YEAR, " so the year doesn't appear as a giveaway at the start
+    t = t.replace(/^In\s+(1[0-9]{3}|20[0-2][0-9]),\s+/i, "");
+    // Mask any remaining years so choices don't reveal the chronological order
+    t = t.replace(/\b(1[0-9]{3}|20[0-2][0-9])\b/g, "____");
+    return t.length > 78 ? t.slice(0, 75) + "..." : t;
+  };
 
   // Slide a window of 4 across the sorted events
   for (let i = 0; i + 3 < events.length && out.length < count; i++) {
