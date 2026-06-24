@@ -19,7 +19,7 @@ const GENERIC_BLANK_WORDS = new Set([
   "working","following","including","different","important","significant","various","several",
   "another","through","across","around","century","country","region","period","process","system",
   "level","term","terms","role","fact","case","way","use","need","also","even","back","just",
-  "like","more","less","only","last","next","over","same","still","such","very","well",
+  "like","more","less","only","last","next","over","same","still","such","very","well","enough",
   // Irregular adverbs (no -ly suffix — not caught by inferPos)
   "always","never","usually","sometimes","rarely","often","frequently","generally","normally",
   "typically","commonly","occasionally","certainly","definitely","probably","possibly","perhaps",
@@ -44,10 +44,15 @@ const DISTRACTOR_BLOCKLIST = new Set([
 // Avoids redundant network calls when the same term appears as an answer in
 // multiple questions. Module-level so it persists across the full generation run.
 const _datamuseCache = new Map();
-async function fetchDatamuseCached(url, signal) {
+// timeoutMs: per-call timeout so parallel calls each get their own deadline
+// instead of sharing one signal that fires at the same wall-clock instant.
+async function fetchDatamuseCached(url, timeoutMs = 2500) {
   if (_datamuseCache.has(url)) return _datamuseCache.get(url);
-  if (_datamuseCache.size > 300) _datamuseCache.clear();
+  // LRU eviction: delete the oldest entry rather than clearing the whole cache,
+  // which would cause a stampede of simultaneous refetches for parallel calls.
+  if (_datamuseCache.size > 300) _datamuseCache.delete(_datamuseCache.keys().next().value);
   try {
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
     const res = await fetch(url, signal ? { signal } : {});
     if (!res.ok) return [];
     const data = await res.json();
@@ -105,10 +110,12 @@ function resolveCoref(sentences) {
       resolved = resolved.replace(/\bIt\b/g, lastThing);
     }
 
-    // Update antecedent tracking from original sentence
+    // Update antecedent tracking from original sentence.
+    // Critical: only update lastPerson when a genuine person entity is found.
+    // A sentence like "In France, he signed..." must NOT overwrite lastPerson
+    // with "France" — that would resolve the next He/She to a place name.
     const persons = s.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b/g)?.filter(m => !STOP.has(m.toLowerCase())) || [];
     if (persons.length) {
-      // Prefer full names (multi-word) that are not places/orgs
       const multiWord = persons.find(p => {
         if (!/^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(p)) return false;
         const t = detectEntityType(p);
@@ -121,7 +128,7 @@ function resolveCoref(sentences) {
           const t = detectEntityType(p);
           return t !== "place" && t !== "org";
         });
-        lastPerson = nonPlace || null;
+        if (nonPlace) lastPerson = nonPlace; // only update if a real person was found
       }
     }
     // Allow capitalized group nouns: "The Romans", "The Americans", "the soldiers"
@@ -135,7 +142,7 @@ function resolveCoref(sentences) {
 }
 
 // ── Sentence extraction + scoring ─────────────────────────────────────────────
-function scoreSentence(s, idx, total, isParaFirst = false) {
+function scoreSentence(s, idx, total, isParaFirst = false, rawS = s) {
   let score = 0;
   if (isParaFirst) score += 2;
   if (idx < total * 0.2) score += 2;
@@ -148,11 +155,14 @@ function scoreSentence(s, idx, total, isParaFirst = false) {
   if (/\b(founded|invented|discovered|created|established|wrote|built|led|won|defeated|conquered|signed|developed|introduced)\b/i.test(s)) score += 2;
   const wc = s.split(" ").length;
   if (wc < 8 || wc > 45) score -= 2;
-  // Penalize sentences that still open with a pronoun or demonstrative after coreference
-  // resolution — they're hard to understand without prior context
-  if (/^(This|These|Those|That|It\b|He\b|She\b|They\b)/.test(s)) score -= 2;
+  // Penalize sentences that ORIGINALLY started with a pronoun/demonstrative before coreference
+  // resolution. Using rawS (pre-resolved) catches "This event led to..." which coref
+  // can't fix, while not penalizing sentences whose He/She/They was successfully resolved.
+  if (/^(This|These|Those|That|It\b|He\b|She\b|They\b)/.test(rawS)) score -= 2;
   // Bonus for sentences with a concrete proper-noun subject followed by a strong verb
   if (/^[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){0,3}\s+(was|is|were|are|had|has)\b/.test(s)) score += 1;
+  // Penalize dialogue-heavy sentences — questions about who-said-what test reading, not comprehension
+  if ((s.match(/"/g) || []).length >= 4) score -= 3;
   return score;
 }
 
@@ -222,11 +232,11 @@ function extractSentences(text, { sorted = true, returnBoth = false } = {}) {
       return true;
     });
   const resolved = resolveCoref(raw);
-  const scored = resolved.map((s, i) => ({ s, score: scoreSentence(s, i, resolved.length, paraFirstSet.has(raw[i])) }));
+  const scored = resolved.map((s, i) => ({ s, score: scoreSentence(s, i, resolved.length, paraFirstSet.has(raw[i]), raw[i]) }));
   if (returnBoth) {
     const ordered = scored.map(x => x.s);
     const sortedArr = [...scored].sort((a, b) => b.score - a.score).map(x => x.s);
-    return { sorted: sortedArr, ordered };
+    return { sorted: sortedArr, ordered, raw };
   }
   if (!sorted) return scored.map(x => x.s);
   return scored
@@ -235,10 +245,18 @@ function extractSentences(text, { sorted = true, returnBoth = false } = {}) {
 }
 
 // ── TF-IDF ────────────────────────────────────────────────────────────────────
+// Stem normalization applied at index time so "founded"/"founding"/"founder"
+// all accumulate under the same key. This matches the fallback lookups in
+// makeVocabContext and makeDoubleFill that already strip common suffixes.
+function stem(w) {
+  return w.replace(/(?:ers?|ing|ed|ly|ness|tion|sion|ment|ity)$/, "");
+}
 function tfidf(sentences) {
   const docCount = sentences.length;
   const tf = sentences.map(s => {
-    const words = s.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 3 && !STOP.has(w));
+    const words = s.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/)
+      .filter(w => w.length > 3 && !STOP.has(w))
+      .map(stem);
     const freq = {};
     words.forEach(w => { freq[w] = (freq[w] || 0) + 1; });
     return freq;
@@ -343,6 +361,14 @@ function trimDefinition(def) {
   return words.length > 9 ? words.slice(0, 9).join(" ") : def;
 }
 
+// Adjective/adverb words that can start a predicate-complement ("X is good enough for Y")
+// but must never be mistaken for the opening of a definition noun phrase.
+const DEF_ADJ_STARTS = new Set([
+  "good","great","well","bad","old","new","young","big","small","long","short","high","low",
+  "enough","too","quite","very","also","both","such","most","least","best","worst","better",
+  "worse","more","less","rather","fairly","pretty","somewhat","known","named","called","said",
+]);
+
 function extractDefinition(sentence) {
   const defMatch = sentence.match(
     /^([A-Z][A-Za-z\s]{1,40}?)\s+(?:is|are|was|were|refers to|is defined as|is known as)\s+(?:a |an |the )?(.{10,})/
@@ -350,6 +376,9 @@ function extractDefinition(sentence) {
   if (defMatch) {
     const subject = defMatch[1].trim();
     const definition = trimDefinition(defMatch[2].replace(/[.!?]+$/, "").trim());
+    const defFirstWord = definition.split(" ")[0].toLowerCase();
+    // Reject if the "definition" is actually a predicate adjective phrase, not a noun-phrase description
+    if (DEF_ADJ_STARTS.has(defFirstWord)) return null;
     if (subject.split(" ").length <= 5 && definition.split(" ").length >= 3 && !VAGUE_SUBJECT.test(subject)) return { subject, definition };
   }
   // "X is the term/name/word for Y" — encyclopedic definition pattern
@@ -370,7 +399,13 @@ function extractCauseEffect(sentence) {
   const becauseM = sentence.match(/^(.{15,150}?)\s+because\s+(.{10,})$/i);
   if (becauseM) {
     const effect = becauseM[1].replace(/[.!?]+$/, "");
-    const cause = becauseM[2].replace(/[.!?]+$/, "");
+    let cause = becauseM[2].replace(/[.!?]+$/, "");
+    // If the cause clause is a compound (joined by and/but/or), strip the tail
+    // so the answer is a single clean clause rather than a run-on phrase.
+    if (cause.split(/\s+/).length > 8) {
+      const trimmed = cause.replace(/\s*,?\s+\b(and|but|or|yet|so)\b.+$/, "");
+      if (trimmed.split(/\s+/).length >= 4) cause = trimmed;
+    }
     return { question: `What was the reason that ${effect.charAt(0).toLowerCase() + effect.slice(1)}?`, answer: cause };
   }
   // "A, therefore/thus/hence B" → "What resulted from A?"
@@ -645,10 +680,14 @@ function getDistractors(answer, allTerms, type, sentenceTerms = []) {
   if (type === "year") {
     const y = parseInt(answer);
     const maxY = new Date().getFullYear();
-    // Avoid ±1 (tests exact recall, not knowledge) and future years (obviously impossible for historical facts)
-    return shuffle([y - 3, y + 3, y - 8, y + 8, y - 15, y + 15, y - 25, y + 25]
-      .filter(n => n !== y && n > 1000 && n <= maxY))
-      .slice(0, 3).map(String);
+    // Prefer years that actually appear elsewhere in the text — they're contextually
+    // plausible to a student who read the passage, unlike fixed ±delta values.
+    const textYears = [...new Set([...allTerms, ...sentenceTerms])]
+      .filter(t => /^\d{4}$/.test(t) && parseInt(t) !== y && parseInt(t) > 1000 && parseInt(t) <= maxY);
+    if (textYears.length >= 3) return shuffle(textYears).slice(0, 3);
+    const computed = shuffle([y - 3, y + 3, y - 8, y + 8, y - 15, y + 15, y - 25, y + 25]
+      .filter(n => n !== y && n > 1000 && n <= maxY)).map(String);
+    return [...new Set([...textYears, ...computed])].slice(0, 3);
   }
   if (type === "number") {
     const n = parseFloat(answer.replace(/,/g, ""));
@@ -665,7 +704,7 @@ function getDistractors(answer, allTerms, type, sentenceTerms = []) {
     const pool = [...new Set([...sameS, ...allTerms])].filter(t => t !== answer);
     // Full names first; fall back to single-name proper nouns (e.g. Socrates, Mozart)
     const fullNames = pool.filter(t => /^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(t));
-    const singleNames = pool.filter(t => /^[A-Z][a-z]{2,}$/.test(t) && detectEntityType(t) !== "place");
+    const singleNames = pool.filter(t => /^[A-Z][a-z]{2,}$/.test(t) && detectEntityType(t) !== "place" && detectEntityType(t) !== "org");
     const people = [...new Set([...fullNames, ...singleNames])];
     if (people.length >= 3) return shuffle(people).slice(0, 3);
   }
@@ -674,12 +713,15 @@ function getDistractors(answer, allTerms, type, sentenceTerms = []) {
     if (places.length >= 3) return shuffle(places).slice(0, 3);
   }
   if (sameS.length >= 3) return shuffle(sameS).slice(0, 3);
-  // Type-matched fallback: prefer same entity type before falling back to anything
   const targetType = detectEntityType(answer);
   if (targetType !== "noun") {
     const sameType = allTerms.filter(t => t !== answer && t.length > 2 && detectEntityType(t) === targetType);
     if (sameType.length >= 3) return shuffle(sameType).slice(0, 3);
+    // Typed answers (person/place/year/org) with too few same-type distractors produce
+    // misleading questions — callers will skip them rather than use wrong-type terms.
+    return [];
   }
+  // For genuine noun-type answers any other noun in the passage is plausible.
   return shuffle(allTerms.filter(t => t !== answer && t.length > 2)).slice(0, 3);
 }
 
@@ -698,8 +740,16 @@ function negateSentence(sentence, allEntities) {
     if (replacement) return sentence.replace(target, replacement);
   }
   // Swap ordinals before falling back to year/number changes — more naturally-sounding false statements
-  const ORDINAL_SWAPS = { first: "second", second: "first", third: "second", fourth: "third", fifth: "fourth", primary: "secondary", main: "secondary", last: "first" };
-  const ordinalM = sentence.match(/\b(first|second|third|fourth|fifth|primary|main|last)\b/i);
+  // Richer swap table — avoids the predictable first↔second tell that students learn.
+  // Semantically grounded pairs (primary/central/leading) are harder to spot mechanically.
+  const ORDINAL_SWAPS = {
+    first: "third", second: "first", third: "second", fourth: "third", fifth: "fourth",
+    primary: "secondary", central: "peripheral", leading: "following",
+    major: "minor", key: "peripheral", main: "secondary",
+    earliest: "latest", latest: "earliest", largest: "smallest", smallest: "largest",
+    last: "first",
+  };
+  const ordinalM = sentence.match(/\b(first|second|third|fourth|fifth|primary|central|leading|major|key|main|earliest|latest|largest|smallest|last)\b/i);
   if (ordinalM) {
     const swap = ORDINAL_SWAPS[ordinalM[1].toLowerCase()];
     if (swap) {
@@ -852,8 +902,7 @@ async function negateWithDatamuse(sentence) {
   }
   for (const { word, index, raw } of shuffle(candidates).slice(0, 3)) {
     try {
-      const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-      const data = await fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`, signal);
+      const data = await fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`);
       if (!data.length) continue;
       const ant = data.map(d => d.word).find(w => w && !w.includes(" "));
       if (!ant) continue;
@@ -865,38 +914,45 @@ async function negateWithDatamuse(sentence) {
 }
 
 async function makeTF(sentences, count, allEntities, usedSentences) {
-  const out = [];
   const NEGATION = /\b(not|never|no one|nobody|nothing|nowhere|neither|nor|without|lack|absence)\b/i;
-  // Unresolved pronoun as subject — context-free, ambiguous as a standalone statement
   const BARE_PRONOUN_SUBJECT = /^(He|She|It|They)\b/;
-  // Mid-clause pronoun as main subject after a comma — e.g. "Like X, it was designed..."
   const MID_CLAUSE_PRONOUN = /,\s+(it|he|she|they|them)\s+\b(was|is|were|are|had|has|did|could|would)\b/i;
-  // Target exactly 50/50 instead of random per-sentence coin flip, so a run
-  // never ends up with all True or all False questions.
+
   const trueTarget = Math.ceil(count / 2);
-  let trueCount = 0;
-  for (const s of shuffle(sentences)) {
-    if (out.length >= count) break;
+  const falseTarget = count - trueTarget;
+  const shuffled = shuffle([...sentences]);
+
+  // Pass 1: collect True candidates independently — don't force False onto sentences
+  // that qualified as True just because the True bucket is full.
+  const trueCandidates = [];
+  for (const s of shuffled) {
     if (usedSentences.has(s)) continue;
     const q = s.replace(/[.!?]+$/, "");
     if (!questionOk(q)) continue;
-    // Skip dialogue-heavy sentences — they're often truncated or context-dependent fragments
     if ((s.match(/"/g) || []).length >= 4) continue;
-    const canBeTrue = !NEGATION.test(s) && !BARE_PRONOUN_SUBJECT.test(s) && !MID_CLAUSE_PRONOUN.test(s);
-    if (trueCount < trueTarget && canBeTrue) {
-      usedSentences.add(s);
-      out.push({ type: "tf", question: q, answer: "True", difficulty: "easy", explanation: "This statement appears directly in the source." });
-      trueCount++;
-    } else {
-      // Try antonym swap via Datamuse first for a more believable false statement
-      const neg = await negateWithDatamuse(s) || negateSentence(s, allEntities);
-      if (neg && questionOk(neg)) {
-        usedSentences.add(s);
-        out.push({ type: "tf", question: neg.replace(/[.!?]+$/, ""), answer: "False", difficulty: "medium", explanation: `Correct: "${s}"` });
-      }
+    if (!NEGATION.test(s) && !BARE_PRONOUN_SUBJECT.test(s) && !MID_CLAUSE_PRONOUN.test(s)) {
+      trueCandidates.push({ s, q });
     }
   }
-  return out;
+  const trueQs = trueCandidates.slice(0, trueTarget);
+  const usedForTrue = new Set(trueQs.map(x => x.s));
+
+  // Pass 2: collect False candidates from sentences not already used as True.
+  // Quality check applies on both sides — no forced negations.
+  const falseQs = [];
+  for (const s of shuffled) {
+    if (falseQs.length >= falseTarget) break;
+    if (usedSentences.has(s) || usedForTrue.has(s)) continue;
+    const neg = await negateWithDatamuse(s) || negateSentence(s, allEntities);
+    if (neg && questionOk(neg)) {
+      falseQs.push({ s, q: neg.replace(/[.!?]+$/, "") });
+    }
+  }
+
+  [...trueQs, ...falseQs].forEach(x => usedSentences.add(x.s));
+  const trueOut = trueQs.map(({ q }) => ({ type: "tf", question: q, answer: "True", difficulty: "easy", explanation: "This statement appears directly in the source." }));
+  const falseOut = falseQs.map(({ q, s }) => ({ type: "tf", question: q, answer: "False", difficulty: "medium", explanation: `Correct: "${s}"` }));
+  return shuffle([...trueOut, ...falseOut]);
 }
 
 async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
@@ -904,6 +960,8 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
+    // Dialogue-heavy sentences ("said:", quoted exchanges) test literal reading, not comprehension
+    if ((s.match(/"/g) || []).length >= 4) continue;
     const sTerms = extractProperNouns(s);
 
     const def = extractDefinition(s);
@@ -925,12 +983,11 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
       // Datamuse fallback for common-word answers (non-proper-noun, non-number)
       if (distractors.length < 3 && !/^[A-Z]/.test(wh.answer) && !/^\d/.test(wh.answer)) {
         try {
-          const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
           const key = wh.answer.toLowerCase();
           const [antData, trgData, synData] = await Promise.all([
-            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(key)}&max=5`, signal),
-            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(key)}&max=8`, signal),
-            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(key)}&max=5`, signal),
+            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(key)}&max=5`),
+            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(key)}&max=8`),
+            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(key)}&max=5`),
           ]);
           const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== key && !DISTRACTOR_BLOCKLIST.has(w));
           if (apiWords.length >= 3) distractors = shuffle(apiWords).slice(0, 3);
@@ -955,12 +1012,11 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
     // Datamuse fallback for common-word answers (non-proper-noun, non-number)
     if (distractors.length < 3 && !/^[A-Z]/.test(answer) && !/^\d/.test(answer)) {
       try {
-        const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
         const key = answer.toLowerCase();
         const [antData, trgData, synData] = await Promise.all([
-          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(key)}&max=5`, signal),
-          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(key)}&max=8`, signal),
-          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(key)}&max=5`, signal),
+          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(key)}&max=5`),
+          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(key)}&max=8`),
+          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(key)}&max=5`),
         ]);
         const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== key && !DISTRACTOR_BLOCKLIST.has(w));
         if (apiWords.length >= 3) distractors = shuffle(apiWords).slice(0, 3);
@@ -1046,7 +1102,7 @@ function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) 
       .forEach(w => { wordFreq[w] = (wordFreq[w] || 0) + 1; });
   });
   const fullTerms = Object.keys(wordFreq)
-    .map(w => ({ w, score: tfidfScores[w] || tfidfScores[w.replace(/(?:ers?|ing|ed|ly|ness|tion)$/, "")] || 0 }))
+    .map(w => ({ w, score: tfidfScores[stem(w)] || 0 }))
     .sort((a, b) => b.score - a.score)
     .map(({ w }) => w);
 
@@ -1100,11 +1156,10 @@ async function fetchDatamuseDistractors(word, textPool) {
   const lenMin = word.length - 3, lenMax = word.length + 5;
   let apiWords = [];
   try {
-    const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
     const [antData, trgData, synData] = await Promise.all([
-      fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=8`, signal),
-      fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(word)}&max=12`, signal),
-      fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(word)}&max=8`, signal),
+      fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=8`, 3000),
+      fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(word)}&max=12`, 3000),
+      fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(word)}&max=8`, 3000),
     ]);
     // Prioritise antonyms (clearly wrong), then triggers (same topic), then synonyms (close but distinct)
     apiWords = [...antData, ...trgData, ...synData]
@@ -1134,7 +1189,7 @@ async function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSen
   });
   // Score full words using their TF-IDF score (or their stem's score as fallback)
   const fullVocabTerms = Object.keys(wordFreq)
-    .map(w => ({ w, score: tfidfScores[w] || tfidfScores[w.replace(/(?:ers?|ing|ed|ly|ness|tion)$/, "")] || 0 }))
+    .map(w => ({ w, score: tfidfScores[stem(w)] || 0 }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 50)
     .map(({ w }) => w);
@@ -1199,19 +1254,23 @@ function makeMainIdea(sentences, usedSentences) {
 function makeOrdering(orderedSentences, count, usedSentences) {
   const out = [];
   const SEQ = /\b(first|second|then|next|after|before|finally|initially|later|meanwhile|subsequently|afterward)\b/i;
-  for (let i = 0; i <= orderedSentences.length - 3 && out.length < count; i++) {
-    const group = orderedSentences.slice(i, i + 3);
-    if (group.some(s => usedSentences.has(s))) continue;
-    // Require at least 1 sequence signal word (was: all 3 must have one)
-    if (!group.some(s => SEQ.test(s))) continue;
-    // Require at least 2 of 3 sentences to pass quality check (was: all 3)
-    if (group.filter(s => questionOk(s)).length < 2) continue;
-    const correct = [...group];
-    let scrambled = shuffle([...group]);
-    let tries = 0;
-    while (scrambled.every((s, j) => s === correct[j]) && tries++ < 10) scrambled = shuffle([...group]);
-    group.forEach(s => usedSentences.add(s));
-    out.push({ type: "ordering", question: "Arrange these sentences in the correct order:", items: scrambled, answers: correct, difficulty: "hard", explanation: `Correct order: 1. "${correct[0].slice(0, 60)}..." 2. "${correct[1].slice(0, 60)}..." 3. "${correct[2].slice(0, 60)}..."` });
+  // Try 4-sentence windows first (richer ordering task); fall back to 3.
+  for (const windowSize of [4, 3]) {
+    if (out.length >= count) break;
+    for (let i = 0; i <= orderedSentences.length - windowSize && out.length < count; i++) {
+      const group = orderedSentences.slice(i, i + windowSize);
+      if (group.some(s => usedSentences.has(s))) continue;
+      if (!group.some(s => SEQ.test(s))) continue;
+      const minOk = windowSize === 4 ? 3 : 2;
+      if (group.filter(s => questionOk(s)).length < minOk) continue;
+      const correct = [...group];
+      let scrambled = shuffle([...group]);
+      let tries = 0;
+      while (scrambled.every((s, j) => s === correct[j]) && tries++ < 10) scrambled = shuffle([...group]);
+      group.forEach(s => usedSentences.add(s));
+      const expParts = correct.map((s, j) => `${j + 1}. "${s.slice(0, 50)}..."`).join(" ");
+      out.push({ type: "ordering", question: "Arrange these sentences in the correct order:", items: scrambled, answers: correct, difficulty: "hard", explanation: `Correct order: ${expParts}` });
+    }
   }
   return out;
 }
@@ -1235,8 +1294,7 @@ async function makeErrorId(sentences, count, usedSentences) {
     let swapped = null, errorWord = null, errorOriginal = null;
     for (const { word, index, raw } of shuffle(candidates).slice(0, 4)) {
       try {
-        const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-        const data = await fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`, signal);
+        const data = await fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`);
         if (!data.length) continue;
         const ant = data.map(d => d.word).find(w => w && !w.includes(" "));
         if (!ant) continue;
@@ -1247,12 +1305,13 @@ async function makeErrorId(sentences, count, usedSentences) {
       } catch {}
     }
     if (!swapped || !errorWord) continue;
-    // Find 3 other nouns/content words as decoy spans
+    // Collect decoys from the ORIGINAL sentence so the swapped antonym isn't in the pool.
+    // Filter on errorOriginal (the pre-swap word) to avoid excluding the antonym's match.
     const decoys = [];
     const decoyRe = /\b([A-Za-z]{4,})\b/g;
-    while ((m = decoyRe.exec(swapped)) !== null) {
+    while ((m = decoyRe.exec(s)) !== null) {
       const w = m[1];
-      if (w.toLowerCase() === errorWord.toLowerCase() || STOP.has(w.toLowerCase())) continue;
+      if (w.toLowerCase() === errorOriginal.toLowerCase() || STOP.has(w.toLowerCase())) continue;
       decoys.push(w);
     }
     if (decoys.length < 3) continue;
@@ -1497,12 +1556,16 @@ function textRank(sentences, iterations = 30, damping = 0.85) {
     new Set(s.toLowerCase().replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length > 3 && !STOP.has(w)))
   );
 
+  const sentLens = capped.map(s => s.split(/\s+/).length);
   function sim(i, j) {
     const a = wordSets[i], b = wordSets[j];
     if (!a.size || !b.size) return 0;
     let inter = 0;
     for (const w of a) if (b.has(w)) inter++;
-    return inter / (Math.log2(a.size + 1) + Math.log2(b.size + 1) + 1e-6);
+    // Use sentence word count (not unique-word set size) in the denominator.
+    // Standard TextRank: log(len_a)+log(len_b) penalizes short sentences that
+    // otherwise get artificially inflated overlap ratios.
+    return inter / (Math.log2(sentLens[i] + 1) + Math.log2(sentLens[j] + 1) + 1e-6);
   }
 
   // Precompute similarity matrix
@@ -1845,8 +1908,13 @@ async function makeConceptNetQuestion(sentences, count, tfidfScores, allTerms, u
       const cRelId = candidate.rel["@id"];
       const cPool = [...(relPool[cRelId] || [])].filter(w => w !== candidate.end.label.toLowerCase());
       if (cPool.length >= 3) {
+        const cAnswer = candidate.end.label.toLowerCase();
+        // Only use this edge if the answer actually appears in the source text.
+        // Pure world-knowledge answers (not mentioned in the passage) have no
+        // context clue for students reading this specific document.
+        if (!sentences.some(s => s.toLowerCase().includes(cAnswer))) continue;
         edge = candidate; relId = cRelId; pool = cPool;
-        answer = edge.end.label.toLowerCase();
+        answer = cAnswer;
         questionText = CN_REL[relId](term);
         break;
       }
@@ -1872,10 +1940,46 @@ async function makeConceptNetQuestion(sentences, count, tfidfScores, allTerms, u
   return out;
 }
 
+// ── Pronoun Reference questions ───────────────────────────────────────────────
+// Compares raw (pre-coref) and resolved sentences. Wherever a pronoun was
+// replaced by a name, generate: "Who does 'He' refer to in this passage?"
+function makePronounRefQuestions(rawSentences, resolvedSentences, allTerms, count, usedSentences) {
+  const out = [];
+  const PRON_RE = /\b(He|She|They|It)\b/;
+  for (let i = 0; i < rawSentences.length && out.length < count; i++) {
+    const raw = rawSentences[i];
+    const resolved = resolvedSentences[i];
+    if (raw === resolved) continue;
+    if (usedSentences.has(raw)) continue;
+    const pronounMatch = raw.match(PRON_RE);
+    if (!pronounMatch) continue;
+    // Find entities that appear in resolved but not in raw — these are the referents
+    const rawEntities = new Set(extractProperNouns(raw));
+    const newEntities = extractProperNouns(resolved).filter(e => !rawEntities.has(e));
+    if (!newEntities.length) continue;
+    const antecedent = newEntities[0];
+    const distractors = shuffle(allTerms.filter(t => t !== antecedent && /^[A-Z]/.test(t) && t.length > 2)).slice(0, 3);
+    if (distractors.length < 2) continue;
+    const pronoun = pronounMatch[0];
+    const display = raw.length > 100 ? raw.slice(0, 100) + "..." : raw;
+    const choices = shuffle([antecedent, ...distractors]);
+    usedSentences.add(raw);
+    out.push({
+      type: "mcq",
+      question: `In the passage, who does "${pronoun}" refer to in: "${display}"?`,
+      choices,
+      answer: choices.indexOf(antecedent),
+      difficulty: "medium",
+      explanation: `"${pronoun}" refers to "${antecedent}" based on the preceding context.`,
+    });
+  }
+  return out;
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   if (text.length > 50000) text = text.slice(0, 50000);
-  const { sorted: sentences, ordered: sentencesOrdered } = extractSentences(text, { returnBoth: true });
+  const { sorted: sentences, ordered: sentencesOrdered, raw: rawSentences } = extractSentences(text, { returnBoth: true });
   if (sentences.length < 5) throw new Error("Not enough content to generate questions. Try adding more text.");
 
   const tfidfScores = tfidf(sentences);
@@ -1953,6 +2057,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
       ...errorQs,
       ...cnQs,
       ...makeNotTrue(ranked, Math.ceil(q / 3), allTerms, usedSentences),
+      ...makePronounRefQuestions(rawSentences, sentencesOrdered, allTerms, Math.ceil(q / 3), usedSentences),
     ]);
     // Soft cap: KWIC-blank questions ("Choose the correct answer: / Fill in the blank:")
     // are the lowest-quality format — limit them to at most 35% of the target count.
