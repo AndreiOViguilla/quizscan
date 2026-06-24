@@ -729,9 +729,16 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
     const sStripped = stripEmbeddedClauses(s);
     const wh = toWhQuestion(s) || (sStripped !== s ? toWhQuestion(sStripped) : null);
     if (wh && questionOk(wh.question)) {
-      usedSentences.add(s);
-      out.push({ type: "fill", question: wh.question, answer: wh.answer, difficulty: "medium", explanation: `From source: "${s}"` });
-      continue;
+      const wc = wh.answer.split(' ').length;
+      const isProper = /^[A-Z]/.test(wh.answer);
+      // Fill answers must be short: proper nouns up to 5 words ("The Great March"),
+      // common nouns up to 2 words ("radioactivity", "carbon dioxide")
+      if (wc <= (isProper ? 5 : 2)) {
+        usedSentences.add(s);
+        out.push({ type: "fill", question: wh.question, answer: wh.answer, difficulty: "medium", explanation: `From source: "${s}"` });
+        continue;
+      }
+      // Answer too long — fall through to KWIC
     }
     // Skip sentences with embedded quotes for KWIC — they're from reviews/opinions, not facts
     if (/"[^"]{5,}"/.test(s)) continue;
@@ -885,7 +892,7 @@ function makeCauseEffect(sentences, count, usedSentences) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
     const ce = extractCauseEffect(s);
-    if (!ce || !questionOk(ce.question) || ce.answer.length < 5 || ce.answer.length > 60) continue;
+    if (!ce || !questionOk(ce.question) || ce.answer.length < 5 || ce.answer.split(' ').length > 6) continue;
     usedSentences.add(s);
     out.push({ type: "fill", question: ce.question, answer: trimAnswer(ce.answer), difficulty: "hard", explanation: `From source: "${s}"` });
   }
@@ -899,7 +906,7 @@ function makeSequence(sentences, count, usedSentences) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
     const seq = extractSequence(s);
-    if (!seq || !questionOk(seq.question) || seq.answer.length < 5 || seq.answer.length > 60) continue;
+    if (!seq || !questionOk(seq.question) || seq.answer.length < 5 || seq.answer.split(' ').length > 6) continue;
     usedSentences.add(s);
     out.push({ type: "fill", question: seq.question, answer: trimAnswer(seq.answer), difficulty: "medium", explanation: `From source: "${s}"` });
   }
