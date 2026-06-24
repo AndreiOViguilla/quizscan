@@ -1794,14 +1794,14 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     const depUsed = new Set();
     const depQs = makeDepParseQuestions(parseResults, allTerms, depUsed);
     [...depUsed].forEach(s => usedSentences.add(s));
-    qs = shuffle([...depQs, ...makeFill(ranked, numQ, tfidfScores, usedSentences)]).slice(0, numQ);
+    qs = shuffle([...depQs, ...makeFill(ranked, numQ * 2, tfidfScores, usedSentences)]);
   }
-  else if (qType === "tf") qs = await makeTF(ranked, numQ, allTerms, usedSentences);
+  else if (qType === "tf") qs = await makeTF(ranked, numQ * 2, allTerms, usedSentences);
   else if (qType === "mcq") {
     const depUsed = new Set();
     const depQs = makeDepParseQuestions(parseResults, allTerms, depUsed).filter(q => q.type === 'mcq');
     [...depUsed].forEach(s => usedSentences.add(s));
-    qs = shuffle([...depQs, ...await makeMCQ(ranked, numQ, tfidfScores, allTerms, usedSentences)]).slice(0, numQ);
+    qs = shuffle([...depQs, ...await makeMCQ(ranked, numQ * 2, tfidfScores, allTerms, usedSentences)]);
   }
   else if (qType === "double_fill") qs = makeDoubleFill(ranked, numQ, tfidfScores, allTerms, usedSentences);
   else if (qType === "ordering") qs = makeOrdering(sentencesOrdered, numQ, usedSentences);
@@ -1855,13 +1855,14 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
       }
       return true;
     });
-    qs = interleavedPick(cappedPool, numQ);
+    qs = interleavedPick(cappedPool, Math.min(cappedPool.length, numQ + 8));
   }
   if (!qs.length) throw new Error("Could not extract enough questions. Try a source with more complete sentences.");
 
-  // Deduplicate by answer value — prevents the same year/person/term appearing as the answer repeatedly
+  // Deduplicate by answer value — skip TF/ordering (their answers are "True"/"False" or arrays, not unique content)
   const usedAnswerKeys = new Set();
   qs = qs.filter(q => {
+    if (q.type === 'tf' || q.type === 'ordering') return true;
     const answerStr = (typeof q.answer === "number" ? q.choices?.[q.answer] : q.answer) ?? "";
     const key = String(answerStr).toLowerCase().trim();
     if (!key || usedAnswerKeys.has(key)) return false;
@@ -1869,7 +1870,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     return true;
   });
 
-  // Deduplicate by question stem — prevents near-identical question wording even with different answers
+  // Deduplicate by question stem — prevents near-identical question wording
   const usedStemKeys = new Set();
   qs = qs.filter(q => {
     const stem = q.question.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").slice(0, 60).trim();
@@ -1878,7 +1879,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     return true;
   });
 
-  return qs;
+  return qs.slice(0, numQ);
 }
 
 // ── PDF text extraction (PDF.js CDN) ─────────────────────────────────────────
