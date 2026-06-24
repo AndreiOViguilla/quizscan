@@ -8,9 +8,37 @@ const wink = winkNLP(model);
 const STOP = new Set(["the","a","an","is","are","was","were","be","been","being","have","has","had","do","does","did","will","would","could","should","may","might","shall","can","and","but","or","nor","so","yet","to","of","in","on","at","by","for","with","about","into","from","up","out","over","then","once","also","as","if","while","because","since","although","though","unless","until","when","where","who","which","that","this","these","those","i","you","he","she","it","we","they","me","him","her","us","them","my","your","his","its","our","their","what","how","all","each","every","some","any","few","more","most","other","such","not","no","only","own","same","than","too","very","just","both","either","neither"]);
 
 // Generic content words that make poor fill-in-the-blank targets
-const GENERIC_BLANK_WORDS = new Set(["used","made","came","took","went","said","told","knew","seen","given","called","known","found","many","much","even","part","form","type","kind","ways","time","times","year","years","place","area","world","people","person","thing","things","point","group","number","large","small","long","high","great","well","good","often","later","early","during","within","between","among","based","being","having","making","taking","using","getting","putting","coming","going","looking","working","following","including","different","important","significant","various","several","another","through","across","around","century","country","region","period","process","system","level","term","terms","role","fact","case","way","use","need","also","even","back","just","like","more","less","only","last","next","over","same","still","such","very","well",
-  // Adverbs — grammatically obvious in context, trivially guessable as blanks
-  "always","never","usually","sometimes","rarely","often","frequently","generally","normally","typically","commonly","occasionally","regularly","certainly","definitely","probably","possibly","perhaps","maybe","likely","simply","merely","purely","mainly","mostly","nearly","almost","quite","rather","truly","really","deeply","highly","widely","largely","greatly","strongly","quickly","slowly","easily","clearly","finally","eventually","gradually","initially","originally","previously","already","yet","soon","then","now","once","twice","again","also","too","further","however","therefore","thus","hence","instead","otherwise","meanwhile","nevertheless","nonetheless","furthermore","additionally","consequently","accordingly","similarly","likewise","besides","moreover","anyway","elsewhere","everywhere","somewhere","anywhere","nowhere"]);
+// Non-"-ly" adverbs/function words that inferPos can't detect by word shape.
+// "-ly" adverbs (quickly, deeply, …) are caught dynamically by inferPos() instead.
+const GENERIC_BLANK_WORDS = new Set([
+  "used","made","came","took","went","said","told","knew","seen","given","called","known","found",
+  "many","much","even","part","form","type","kind","ways","time","times","year","years","place",
+  "area","world","people","person","thing","things","point","group","number","large","small",
+  "long","high","great","well","good","often","later","early","during","within","between","among",
+  "based","being","having","making","taking","using","getting","putting","coming","going","looking",
+  "working","following","including","different","important","significant","various","several",
+  "another","through","across","around","century","country","region","period","process","system",
+  "level","term","terms","role","fact","case","way","use","need","also","even","back","just",
+  "like","more","less","only","last","next","over","same","still","such","very","well",
+  // Irregular adverbs (no -ly suffix — not caught by inferPos)
+  "always","never","usually","sometimes","rarely","often","frequently","generally","normally",
+  "typically","commonly","occasionally","certainly","definitely","probably","possibly","perhaps",
+  "maybe","likely","nearly","almost","quite","rather","already","yet","soon","once","twice",
+  "again","too","further","however","therefore","thus","hence","instead","otherwise","meanwhile",
+  "furthermore","additionally","consequently","accordingly","similarly","likewise","moreover",
+  "anyway","elsewhere","everywhere","somewhere","anywhere","nowhere","then","now",
+  // Reflexive pronouns — blanking a pronoun tests nothing about the source content
+  "myself","yourself","himself","herself","themselves","itself","ourselves","yourselves",
+]);
+
+// Words that must never appear as MCQ distractors regardless of Datamuse context.
+// rel_trg results can surface abuse/drug terms for innocent words like "child".
+const DISTRACTOR_BLOCKLIST = new Set([
+  "pornography","porn","abuse","rape","molestation","pedophilia",
+  "cocaine","heroin","marijuana","methamphetamine","narcotics","drugs",
+  "murder","killing","suicide","genocide","homicide","massacre",
+  "prostitution","masturbation","orgasm","intercourse","nudity",
+]);
 
 // ── Datamuse response cache ───────────────────────────────────────────────────
 // Avoids redundant network calls when the same term appears as an answer in
@@ -692,7 +720,8 @@ function negateSentence(sentence, allEntities) {
     return sentence.replace(numMatch[0], String(Math.random() > 0.5 ? n + delta : Math.max(1, n - delta)));
   }
   const verbMatch = sentence.match(/\b(is|are|was|were)\b/i);
-  if (verbMatch) return sentence.replace(verbMatch[0], `${verbMatch[0]} not`);
+  // Only add "not" if the sentence doesn't already contain one — prevents "not not" double negation
+  if (verbMatch && !/\bnot\b/i.test(sentence)) return sentence.replace(verbMatch[0], `${verbMatch[0]} not`);
   return null;
 }
 
@@ -720,6 +749,10 @@ function questionOk(q) {
   if (typeof q !== "string" || q.length < 10 || q.length > 250) return false;
   if (/\b(undefined|null)\b/.test(q)) return false;
   if (/^[a-z]/.test(q)) return false;
+  // Reject NLP artifacts: "did ... have been" mixed tense (e.g. "What did Many men have been named?")
+  if (/\bdid\b.+\bhave been\b/.test(q)) return false;
+  // Reject sentences that are clearly truncated mid-dialogue (end on a lone question word)
+  if (/\b(What|Who|When|Where|Why|How)\s*$/.test(q)) return false;
   return true;
 }
 
@@ -847,6 +880,8 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
     if (usedSentences.has(s)) continue;
     const q = s.replace(/[.!?]+$/, "");
     if (!questionOk(q)) continue;
+    // Skip dialogue-heavy sentences — they're often truncated or context-dependent fragments
+    if ((s.match(/"/g) || []).length >= 4) continue;
     const canBeTrue = !NEGATION.test(s) && !BARE_PRONOUN_SUBJECT.test(s) && !MID_CLAUSE_PRONOUN.test(s);
     if (trueCount < trueTarget && canBeTrue) {
       usedSentences.add(s);
@@ -897,7 +932,7 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
             fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(key)}&max=8`, signal),
             fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(key)}&max=5`, signal),
           ]);
-          const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== key);
+          const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== key && !DISTRACTOR_BLOCKLIST.has(w));
           if (apiWords.length >= 3) distractors = shuffle(apiWords).slice(0, 3);
         } catch {}
       }
@@ -927,7 +962,7 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
           fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(key)}&max=8`, signal),
           fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(key)}&max=5`, signal),
         ]);
-        const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== key);
+        const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== key && !DISTRACTOR_BLOCKLIST.has(w));
         if (apiWords.length >= 3) distractors = shuffle(apiWords).slice(0, 3);
       } catch {}
     }
@@ -1007,7 +1042,7 @@ function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) 
   const wordFreq = {};
   sentences.forEach(s => {
     (s.toLowerCase().match(/\b[a-z]{4,}\b/g) || [])
-      .filter(w => !STOP.has(w) && !properLower.has(w) && !GENERIC_BLANK_WORDS.has(w))
+      .filter(w => !STOP.has(w) && !properLower.has(w) && !GENERIC_BLANK_WORDS.has(w) && inferPos(w, "") !== "adv")
       .forEach(w => { wordFreq[w] = (wordFreq[w] || 0) + 1; });
   });
   const fullTerms = Object.keys(wordFreq)
@@ -1018,6 +1053,8 @@ function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) 
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
+    // Overlong sentences produce unreadable double-fill questions
+    if (s.length > 200) continue;
     const sLower = s.toLowerCase();
 
     // Find 2 high-scoring whole-word terms in this sentence
@@ -1072,7 +1109,7 @@ async function fetchDatamuseDistractors(word, textPool) {
     // Prioritise antonyms (clearly wrong), then triggers (same topic), then synonyms (close but distinct)
     apiWords = [...antData, ...trgData, ...synData]
       .map(d => (d.word || "").toLowerCase())
-      .filter(w => w && w !== word && !w.includes(" ") && w.length >= lenMin && w.length <= lenMax);
+      .filter(w => w && w !== word && !w.includes(" ") && w.length >= lenMin && w.length <= lenMax && !DISTRACTOR_BLOCKLIST.has(w));
   } catch {}
 
   const textWords = textPool.filter(t => t !== word && t.length >= lenMin && t.length <= lenMax);
@@ -1092,7 +1129,7 @@ async function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSen
   const wordFreq = {};
   sentences.forEach(s => {
     (s.toLowerCase().match(/\b[a-z]{4,}\b/g) || [])
-      .filter(w => !STOP.has(w) && !properLower.has(w) && !GENERIC_BLANK_WORDS.has(w))
+      .filter(w => !STOP.has(w) && !properLower.has(w) && !GENERIC_BLANK_WORDS.has(w) && inferPos(w, "") !== "adv")
       .forEach(w => { wordFreq[w] = (wordFreq[w] || 0) + 1; });
   });
   // Score full words using their TF-IDF score (or their stem's score as fallback)
