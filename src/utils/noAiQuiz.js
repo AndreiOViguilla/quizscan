@@ -379,7 +379,10 @@ function extractDefinition(sentence) {
     const defFirstWord = definition.split(" ")[0].toLowerCase();
     // Reject if the "definition" is actually a predicate adjective phrase, not a noun-phrase description
     if (DEF_ADJ_STARTS.has(defFirstWord)) return null;
-    if (subject.split(" ").length <= 5 && definition.split(" ").length >= 3 && !VAGUE_SUBJECT.test(subject)) return { subject, definition };
+    // Reject subjects ending with a preposition/conjunction — they're clause fragments, not nouns.
+    const BAD_SUBJECT_ENDINGS = new Set(["the","a","an","of","in","on","at","by","and","or","but","its","their","with","which","that","who"]);
+    if (BAD_SUBJECT_ENDINGS.has(subject.split(" ").at(-1).toLowerCase())) return null;
+    if (subject.split(" ").length <= 4 && definition.split(" ").length >= 3 && !VAGUE_SUBJECT.test(subject)) return { subject, definition };
   }
   // "X is the term/name/word for Y" — encyclopedic definition pattern
   const termForMatch = sentence.match(
@@ -646,9 +649,10 @@ function toWhQuestion(sentence) {
       return { question: `What is ${subject} known for?`, answer: reason, type: "noun" };
     }
   }
-  const allYears = [...sentence.matchAll(/\b\d{4}\b/g)];
-  const yearMatch = sentence.match(/\b(in\s+)?(\d{4})\b/);
-  // Skip year question when multiple years are present — the question would leak the other year
+  const allYears = [...sentence.matchAll(/\b(1[3-9]\d{2}|20[0-2]\d)\b/g)];
+  // Require a temporal preposition or sentence-start position — prevents bare quantities
+  // like "2048 soldiers" or phone numbers from triggering the year question branch.
+  const yearMatch = sentence.match(/\b(in|by|until|during|since|after|before|around|from)?\s*(1[3-9]\d{2}|20[0-2]\d)\b/i);
   if (yearMatch && allYears.length === 1) {
     const before = sentence.slice(0, sentence.indexOf(yearMatch[0]));
     const monthPrecedes = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{0,2}\s*$/.test(before);
@@ -803,6 +807,12 @@ function questionOk(q) {
   if (/\bdid\b.+\bhave been\b/.test(q)) return false;
   // Reject sentences that are clearly truncated mid-dialogue (end on a lone question word)
   if (/\b(What|Who|When|Where|Why|How)\s*$/.test(q)) return false;
+  // Coref failure: "What did the/it/he/she/they do?" — stop-word subject
+  if (/^What did (the|a|an|it|this|that|they|he|she)\b/i.test(q)) return false;
+  // Past-tense leaked into did-question: "What did X founded/wrote?"
+  if (/^What did .+\b(was|were|had|has|is|are|been|founded|invented|created|wrote|built)\?$/.test(q)) return false;
+  // Implausibly trivial: "Who is X?" / "What was Y?" with a 1-2 char answer baked in
+  if (/^(Who|What) (is|was|are|were) \w{1,2}\?$/.test(q)) return false;
   return true;
 }
 
@@ -1138,8 +1148,11 @@ function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) 
     }
 
     const answers = found.map(f => f.term); // lowercase for consistent comparison
-    const distractors = shuffle(fullTerms.filter(t => !answers.includes(t) && t.length > 3)).slice(0, 2);
-    if (distractors.length < 2) continue;
+    // 4 distractors → 6 total choices (2 correct + 4 wrong).
+    // With only 4 choices and 2 correct, random guessing hits 50% — not discriminating.
+    // 6 choices drops the random baseline to ~13%.
+    const distractors = shuffle(fullTerms.filter(t => !answers.includes(t) && t.length > 3)).slice(0, 4);
+    if (distractors.length < 4) continue;
 
     // Capitalize first letter for display; original sentence case preserved via comparison being case-insensitive
     const capitalize = w => w.charAt(0).toUpperCase() + w.slice(1);
@@ -1153,7 +1166,11 @@ function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) 
 
 // ── Datamuse: antonyms + triggers + synonyms, always mixed with text pool ─────
 async function fetchDatamuseDistractors(word, textPool) {
-  const lenMin = word.length - 3, lenMax = word.length + 5;
+  // Proportional bounds: ±40% of word length, floor of 3.
+  // Absolute ±3 chars rejects valid long antonyms for short words and passes
+  // single-char strings for very short words.
+  const lenMin = Math.max(3, Math.round(word.length * 0.6));
+  const lenMax = Math.round(word.length * 1.6);
   let apiWords = [];
   try {
     const [antData, trgData, synData] = await Promise.all([
@@ -1234,11 +1251,20 @@ async function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSen
 }
 
 // ── Main Idea question ────────────────────────────────────────────────────────
-function makeMainIdea(sentences, usedSentences) {
+function makeMainIdea(sentences, usedSentences, embeddings = null, centroid = null) {
   const available = sentences.filter(s => !usedSentences.has(s));
   if (available.length < 4) return [];
-  const mainIdea = available[0];
-  const remaining = available.slice(1);
+  let mainIdea = available[0]; // fallback: first in TextRank/neural order
+  if (embeddings && centroid) {
+    // When embeddings are available, pick the available sentence whose embedding
+    // is closest to the document centroid — more reliable than position-based ranking
+    // when TextRank inflates repeated named-entity sentences.
+    const best = available
+      .map(s => { const idx = sentences.indexOf(s); return { s, sim: idx < embeddings.length ? cosineSimilarity(embeddings[idx], centroid) : 0 }; })
+      .sort((a, b) => b.sim - a.sim)[0];
+    if (best) mainIdea = best.s;
+  }
+  const remaining = available.filter(s => s !== mainIdea);
   // Pull distractors from the lower half of ranked sentences — top-ranked ones look too similar
   // to the main idea and make the question ambiguous rather than discriminating.
   const distractors = remaining.length >= 6
@@ -1468,8 +1494,12 @@ function makeTimeline(sentences, count, usedSentences) {
     let t = s.replace(/[.!?]+$/, "");
     // Strip leading "In YEAR, " so the year doesn't appear as a giveaway at the start
     t = t.replace(/^In\s+(1[0-9]{3}|20[0-2][0-9]),\s+/i, "");
-    // Mask any remaining years so choices don't reveal the chronological order
+    // Mask years and relative temporal phrases — both leak ordering information.
     t = t.replace(/\b(1[0-9]{3}|20[0-2][0-9])\b/g, "____");
+    t = t.replace(/\b\d+\s+years?\s+(?:after|before|later|earlier)\b/gi, "some time later");
+    t = t.replace(/\b(the\s+following\s+(?:year|decade|century|month))\b/gi, "later");
+    t = t.replace(/\b(shortly\s+(?:before|after)|soon\s+after|years?\s+later|a\s+decade\s+later)\b/gi, "later");
+    t = t.replace(/\b(by\s+the\s+end\s+of\s+the\s+(?:century|decade|war|period))\b/gi, "eventually");
     return t.length > 78 ? t.slice(0, 75) + "..." : t;
   };
 
@@ -1522,6 +1552,12 @@ function makeContrast(sentences, count, allTerms, usedSentences) {
     // Extract subject from each side
     const leftSubj  = left.match(/\b([A-Z][A-Za-z\s]{1,30}?)\s+(?:was|is|were|are|had|has|did|became|could|would)/)?.[1]?.trim();
     const rightSubj = right.match(/^([A-Z][A-Za-z\s]{1,30}?)\s+(?:was|is|were|are|had|has|did|became|could|would)/)?.[1]?.trim();
+
+    // Discard subjects that start with a subordinating conjunction — they're clause
+    // fragments ("While scholars", "Although Rome"), not usable question subjects.
+    const SUBORD = /^(while|although|though|whereas|since|because|if|when|after|before|as|until|unless)\b/i;
+    if (leftSubj && SUBORD.test(leftSubj)) continue;
+    if (rightSubj && SUBORD.test(rightSubj)) continue;
 
     if (rightSubj && /^[A-Z]/.test(rightSubj) && !STOP.has(rightSubj.toLowerCase()) && leftSubj) {
       // Proper-noun contrast → MCQ
@@ -1711,7 +1747,9 @@ function makeCooccurrence(sentences, count, allTerms, usedSentences) {
   }
 
   // Sort by co-occurrence count, highest first
-  const minCoOcc = sentences.length < 20 ? 1 : 2;
+  // Scale threshold with document length — in a 500-sentence passage a pair
+  // appearing twice is noise; a genuinely associated pair appears 5–10+ times.
+  const minCoOcc = Math.max(1, Math.floor(sentences.length / 40));
   const pairs = Object.entries(coCount)
     .filter(([, c]) => c >= minCoOcc)
     .sort((a, b) => b[1] - a[1]);
@@ -1943,6 +1981,28 @@ async function makeConceptNetQuestion(sentences, count, tfidfScores, allTerms, u
 // ── Pronoun Reference questions ───────────────────────────────────────────────
 // Compares raw (pre-coref) and resolved sentences. Wherever a pronoun was
 // replaced by a name, generate: "Who does 'He' refer to in this passage?"
+// Word-diff approach: walk both token arrays in parallel, find what the pronoun
+// was replaced with. More reliable than entity-set subtraction which fails when
+// the replacement name already appears elsewhere in the raw sentence.
+function findPronounReplacement(raw, resolved) {
+  const PRON = /^(He|She|They|It|His|Her|Their|Him)$/i;
+  const rw = raw.split(/(\s+)/);
+  const sw = resolved.split(/(\s+)/);
+  let ri = 0, si = 0;
+  while (ri < rw.length && si < sw.length) {
+    if (rw[ri] === sw[si]) { ri++; si++; continue; }
+    if (PRON.test(rw[ri].replace(/[^a-zA-Z]/g, ""))) {
+      const start = si;
+      ri++;
+      // advance si until tokens re-sync (max 4 tokens ahead for multi-word names)
+      while (si < sw.length && si - start < 5 && sw[si] !== rw[ri]) si++;
+      const replacement = sw.slice(start, si).join("").replace(/[''s,.]+$/, "").trim();
+      if (replacement && /^[A-Z]/.test(replacement)) return replacement;
+    } else { ri++; si++; }
+  }
+  return null;
+}
+
 function makePronounRefQuestions(rawSentences, resolvedSentences, allTerms, count, usedSentences) {
   const out = [];
   const PRON_RE = /\b(He|She|They|It)\b/;
@@ -1953,11 +2013,9 @@ function makePronounRefQuestions(rawSentences, resolvedSentences, allTerms, coun
     if (usedSentences.has(raw)) continue;
     const pronounMatch = raw.match(PRON_RE);
     if (!pronounMatch) continue;
-    // Find entities that appear in resolved but not in raw — these are the referents
-    const rawEntities = new Set(extractProperNouns(raw));
-    const newEntities = extractProperNouns(resolved).filter(e => !rawEntities.has(e));
-    if (!newEntities.length) continue;
-    const antecedent = newEntities[0];
+    // Use word-diff to find what replaced the pronoun — more reliable than entity-set
+    // subtraction when the referent name already appears elsewhere in the raw sentence.
+    const antecedent = findPronounReplacement(raw, resolved);
     const distractors = shuffle(allTerms.filter(t => t !== antecedent && /^[A-Z]/.test(t) && t.length > 2)).slice(0, 3);
     if (distractors.length < 2) continue;
     const pronoun = pronounMatch[0];
@@ -2046,7 +2104,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
       ...makeComparison(ranked, q, allTerms, usedSentences),
       ...makeDoubleFill(ranked, q, tfidfScores, allTerms, usedSentences),
       ...makeOrdering(sentencesOrdered, Math.ceil(q / 2), usedSentences),
-      ...makeMainIdea(ranked, usedSentences),
+      ...makeMainIdea(ranked, usedSentences, embeddings, embeddings ? computeCentroid(embeddings) : null),
       ...makeSuperlative(ranked, q, usedSentences),
       ...makeListQuestion(ranked, q, allTerms, usedSentences),
       ...makeCooccurrence(ranked, Math.ceil(q / 2), allTerms, usedSentences),
@@ -2069,7 +2127,20 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
       }
       return true;
     });
-    qs = interleavedPick(cappedPool, Math.min(cappedPool.length, numQ + 8));
+    // Dedup by source sentence before interleaving — parallel branches (used1…used5)
+    // each have their own usedSentences so the same sentence can appear in both a TF
+    // and a vocab question simultaneously. The answer-dedup below won't catch this
+    // since the two questions have different answers.
+    const seenSrc = new Set();
+    const srcDedupedPool = cappedPool.filter(q => {
+      const m = q.explanation?.match(/From source: "(.{20,})/);
+      if (!m) return true;
+      const key = m[1].slice(0, 60);
+      if (seenSrc.has(key)) return false;
+      seenSrc.add(key);
+      return true;
+    });
+    qs = interleavedPick(srcDedupedPool, Math.min(srcDedupedPool.length, numQ + 8));
   }
   if (!qs.length) throw new Error("Could not extract enough questions. Try a source with more complete sentences.");
 
@@ -2090,9 +2161,9 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   // Deduplicate by question stem — prevents near-identical question wording
   const usedStemKeys = new Set();
   qs = qs.filter(q => {
-    const stem = q.question.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").slice(0, 60).trim();
-    if (usedStemKeys.has(stem)) return false;
-    usedStemKeys.add(stem);
+    const qStem = q.question.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").slice(0, 60).trim();
+    if (usedStemKeys.has(qStem)) return false;
+    usedStemKeys.add(qStem);
     return true;
   });
 
