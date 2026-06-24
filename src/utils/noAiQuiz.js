@@ -1534,8 +1534,14 @@ function makeCooccurrence(sentences, count, allTerms, usedSentences) {
       // Require at least 2 words OR be a clearly non-month multi-char word
       return e.includes(" ") || e.length >= 5;
     });
-    const concepts = (s.toLowerCase().match(/\b[a-z]{5,}\b/g) || [])
-      .filter(w => !STOP.has(w) && !GENERIC_BLANK_WORDS.has(w) && !MONTHS_SET.has(w) && !properLower.has(w));
+    // Only use NOUN tokens as concepts — verbs ("released") and adjectives ("official") make nonsensical answers
+    const concepts = [];
+    wink.readDoc(s).tokens().each(t => {
+      if (t.out(its.pos) !== 'NOUN') return;
+      const w = t.out(its.value).toLowerCase();
+      if (w.length < 5 || STOP.has(w) || GENERIC_BLANK_WORDS.has(w) || MONTHS_SET.has(w) || properLower.has(w)) return;
+      concepts.push(w);
+    });
     for (const entity of entities) {
       for (const concept of [...new Set(concepts)]) {
         const key = `${entity}|||${concept}`;
