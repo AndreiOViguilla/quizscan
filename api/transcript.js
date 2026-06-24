@@ -25,6 +25,7 @@ module.exports = async function handler(req, res) {
   if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests. Please wait a minute." });
 
   const { videoId, url, debug } = req.query;
+  const debugAllowed = process.env.DEBUG_SECRET && debug === process.env.DEBUG_SECRET;
   let id = videoId;
   if (!id && url) {
     const match = url.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
@@ -123,6 +124,6 @@ module.exports = async function handler(req, res) {
 
   return res.status(404).json({
     error: "No transcript found for this video. It may not have captions enabled.",
-    ...(debug === "1" && { debug: log }),
+    ...(debugAllowed && { debug: log }),
   });
 };

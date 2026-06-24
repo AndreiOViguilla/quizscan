@@ -2,12 +2,24 @@
 // Usage:
 //   GET /api/lookup?service=datamuse&rel_ant=hot&max=4
 //   GET /api/lookup?service=conceptnet&concept=photosynthesis&limit=20
+const slidingWindows = new Map();
+function checkRateLimit(ip, max = 30, windowMs = 60000) {
+  const now = Date.now();
+  const recent = (slidingWindows.get(ip) || []).filter(t => now - t < windowMs);
+  recent.push(now); slidingWindows.set(ip, recent);
+  if (slidingWindows.size > 1000) for (const [k, v] of slidingWindows) { if (v.every(t => now - t >= windowMs)) slidingWindows.delete(k); }
+  return recent.length <= max;
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGIN || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
+  if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests." });
 
   const { service, concept, limit, ...rest } = req.query;
 

@@ -47,7 +47,7 @@ module.exports = async function handler(req, res) {
     <h2 style="margin:0 0 16px;font-size:18px;font-weight:700;">New report submitted</h2>
     ${text ? `
     <div style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:16px;margin-bottom:16px;">
-      <p style="margin:0;font-size:14px;line-height:1.6;color:#d4d4d8;">${text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")}</p>
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#d4d4d8;">${text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")}</p>
     </div>` : ""}
     ${hasImage ? `<p style="margin:0 0 16px;font-size:13px;color:#a1a1aa;">📎 Image attached — check Firebase for the full image.</p>` : ""}
     <p style="margin:0;font-size:12px;color:#52525b;">View all reports in your Firebase Realtime Database under <code style="color:#a1a1aa;">/feedback</code>.</p>

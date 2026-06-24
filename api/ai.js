@@ -24,6 +24,37 @@ async function moderateText(text) {
   } catch { return { flagged: false }; }
 }
 
+// Regex-based fallback filter — runs even when OPENAI_API_KEY is not configured.
+const INAPPROPRIATE_PATTERNS = [
+  /\bf[\W_]*u[\W_]*c[\W_]*k/i, /\bs[\W_]*h[\W_]*i[\W_]*t/i,
+  /\ba[\W_]*s[\W_]*s[\W_]*h[\W_]*o[\W_]*l[\W_]*e/i, /\bb[\W_]*i[\W_]*t[\W_]*c[\W_]*h/i,
+  /\bc[\W_]*u[\W_]*n[\W_]*t\b/i, /\bn[\W_]*i[\W_]*g[\W_]*g[\W_]*[ae]/i,
+  /\bf[\W_]*a[\W_]*g[\W_]*g/i, /\bporn(ograph\w*)?/i, /\bxxx\b/i, /\bhentai\b/i,
+  /\bchild\s+(porn|sex|nude|naked)\b/i,
+  /\bhow\s+to\s+(make|build|synthesize|create)\s+(bomb|drug|meth|cocaine|explosiv)/i,
+  /\bhow\s+to\s+(kill|murder|poison|assault)\s+(a\s+)?(person|someone|people|human)/i,
+  /\bsuicide\s+(method|instruction|how\s+to|step)/i,
+];
+function containsInappropriate(messages) {
+  return messages.some(m => {
+    const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+    return INAPPROPRIATE_PATTERNS.some(pat => pat.test(content));
+  });
+}
+
+// Allowlist of models this proxy is permitted to forward to each provider.
+// Prevents callers from requesting arbitrarily expensive or unavailable models.
+const MODEL_ALLOWLIST = {
+  groq: new Set([
+    "llama-3.3-70b-versatile", "llama-3.1-8b-instant",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+  ]),
+  gemini: new Set(["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]),
+  mistral: new Set(["mistral-small-latest", "mistral-large-latest", "open-mistral-7b"]),
+  openrouter: new Set(["meta-llama/llama-3.1-8b-instruct:free", "mistralai/mistral-7b-instruct:free"]),
+};
+
 const PROVIDERS = {
   groq: {
     url: "https://api.groq.com/openai/v1/chat/completions",
@@ -75,6 +106,8 @@ module.exports = async function handler(req, res) {
   const totalLength = messages.reduce((s, m) => s + (typeof m.content === "string" ? m.content : JSON.stringify(m.content)).length, 0);
   if (totalLength > 12000) return res.status(400).json({ error: "Content too large" });
 
+  if (containsInappropriate(messages)) return res.status(400).json({ error: "Content not allowed." });
+
   const keys = cfg.keys();
   if (!keys.length) return res.status(503).json({ error: `${provider} not configured` });
 
@@ -83,6 +116,10 @@ module.exports = async function handler(req, res) {
   if (inputMod.flagged) return res.status(400).json({ error: "Content not allowed." });
 
   const chosenModel = model || cfg.defaultModel;
+  const allowlist = MODEL_ALLOWLIST[provider];
+  if (allowlist && !allowlist.has(chosenModel)) {
+    return res.status(400).json({ error: `Model not permitted: ${chosenModel}` });
+  }
   const extraHeaders = cfg.extraHeaders || {};
   let lastError = "";
 

@@ -104,6 +104,11 @@ function scoreSentence(s, idx, total, isParaFirst = false) {
   if (/\b(founded|invented|discovered|created|established|wrote|built|led|won|defeated|conquered|signed|developed|introduced)\b/i.test(s)) score += 2;
   const wc = s.split(" ").length;
   if (wc < 8 || wc > 45) score -= 2;
+  // Penalize sentences that still open with a pronoun or demonstrative after coreference
+  // resolution — they're hard to understand without prior context
+  if (/^(This|These|Those|That|It\b|He\b|She\b|They\b)/.test(s)) score -= 2;
+  // Bonus for sentences with a concrete proper-noun subject followed by a strong verb
+  if (/^[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){0,3}\s+(was|is|were|are|had|has)\b/.test(s)) score += 1;
   return score;
 }
 
@@ -125,7 +130,7 @@ function protectAbbrev(text) {
 }
 function restoreAbbrev(text) { return text.replace(/\x02/g, '.'); }
 
-function extractSentences(text, { sorted = true } = {}) {
+function extractSentences(text, { sorted = true, returnBoth = false } = {}) {
   const HAS_VERB = /\b(is|are|was|were|had|has|did|do|does|said|told|made|went|came|felt|looked|asked|moved|played|built|wrote|found|knew|wanted|liked|began|started|ended|called|named|liked|showed|gave|took|kept|left|put|got|set|ran|saw|thought|brought|bought|tried|heard|felt|stood|fell|held|grew|sent|met|led|read|lost|spent|born|raised|died|lived)\b/i;
   const MONTHS = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/;
   const SUBJECTIVE = /\b(i think|i believe|perhaps|maybe|it seems|many believe|some say|in my opinion|possibly|probably)\b/i;
@@ -174,6 +179,11 @@ function extractSentences(text, { sorted = true } = {}) {
     });
   const resolved = resolveCoref(raw);
   const scored = resolved.map((s, i) => ({ s, score: scoreSentence(s, i, resolved.length, paraFirstSet.has(raw[i])) }));
+  if (returnBoth) {
+    const ordered = scored.map(x => x.s);
+    const sortedArr = [...scored].sort((a, b) => b.score - a.score).map(x => x.s);
+    return { sorted: sortedArr, ordered };
+  }
   if (!sorted) return scored.map(x => x.s);
   return scored
     .sort((a, b) => b.score - a.score)
@@ -504,8 +514,13 @@ function makeDepParseQuestions(parseResults, allTerms, usedSentences) {
 function toWhQuestion(sentence) {
   const personSubject = sentence.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+(was|is|were|are|had|has|did|became|founded|invented|discovered|wrote|created|built|led|won|lost)/);
   if (personSubject) {
-    const rest = sentence.slice(personSubject[1].length).trim();
-    return { question: `Who ${rest.replace(/[.!?]+$/, "")}?`, answer: personSubject[1], type: "person" };
+    const subject = personSubject[1].trim();
+    const rest = sentence.slice(subject.length).trim();
+    // Use "Who" only for person entities; use "What" for places, orgs, or abstract things
+    const entityType = detectEntityType(subject);
+    const qWord = entityType === "person" ? "Who" : "What";
+    const type = entityType === "person" ? "person" : "noun";
+    return { question: `${qWord} ${rest.replace(/[.!?]+$/, "")}?`, answer: subject, type };
   }
   // "X founded/invented/created/built/wrote/developed [proper-noun object]"
   const actionMatch = sentence.match(/^([A-Z][A-Za-z\s]{2,35}?)\s+(founded|invented|created|built|wrote|developed|established|introduced|designed|discovered|published|directed|composed|painted|sculpted|passed|signed|ratified|defeated|conquered|captured|elected|appointed|awarded|named|proposed|formulated|coined|solved|produced|launched|formed|organized)\s+(?:the\s+|a\s+|an\s+)?([A-Z][A-Za-z\s]{2,40})/);
@@ -552,8 +567,10 @@ function toWhQuestion(sentence) {
       return { question: `What is ${subject} known for?`, answer: reason, type: "noun" };
     }
   }
+  const allYears = [...sentence.matchAll(/\b\d{4}\b/g)];
   const yearMatch = sentence.match(/\b(in\s+)?(\d{4})\b/);
-  if (yearMatch) {
+  // Skip year question when multiple years are present — the question would leak the other year
+  if (yearMatch && allYears.length === 1) {
     const before = sentence.slice(0, sentence.indexOf(yearMatch[0]));
     const monthPrecedes = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{0,2}\s*$/.test(before);
     const replacement = yearMatch[1] ? "in what year" : monthPrecedes ? "of what year" : "what year";
@@ -628,6 +645,17 @@ function negateSentence(sentence, allEntities) {
       ? shuffle(sameType)[0]
       : shuffle(allEntities.filter(a => a !== target))[0];
     if (replacement) return sentence.replace(target, replacement);
+  }
+  // Swap ordinals before falling back to year/number changes — more naturally-sounding false statements
+  const ORDINAL_SWAPS = { first: "second", second: "first", third: "second", fourth: "third", fifth: "fourth", primary: "secondary", main: "secondary", last: "first" };
+  const ordinalM = sentence.match(/\b(first|second|third|fourth|fifth|primary|main|last)\b/i);
+  if (ordinalM) {
+    const swap = ORDINAL_SWAPS[ordinalM[1].toLowerCase()];
+    if (swap) {
+      const replacement = ordinalM[1][0] === ordinalM[1][0].toUpperCase()
+        ? swap.charAt(0).toUpperCase() + swap.slice(1) : swap;
+      return sentence.slice(0, ordinalM.index) + replacement + sentence.slice(ordinalM.index + ordinalM[0].length);
+    }
   }
   const yearMatch = sentence.match(/\b(\d{4})\b/);
   if (yearMatch) {
@@ -729,13 +757,15 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
     const sStripped = stripEmbeddedClauses(s);
     const wh = toWhQuestion(s) || (sStripped !== s ? toWhQuestion(sStripped) : null);
     if (wh && questionOk(wh.question)) {
-      const wc = wh.answer.split(' ').length;
       const isProper = /^[A-Z]/.test(wh.answer);
-      // Fill answers must be short: proper nouns up to 5 words ("The Great March"),
-      // common nouns up to 2 words ("radioactivity", "carbon dioxide")
-      if (wc <= (isProper ? 5 : 2)) {
+      // Strip leading article for common-noun answers so "the carbon cycle" → "carbon cycle"
+      // doesn't fail the word-count limit while "The Great Wall" keeps its article (it's a proper name)
+      const answer = isProper ? wh.answer : wh.answer.replace(/^(the|a|an)\s+/i, "").trim();
+      const wc = answer.split(" ").length;
+      // Proper nouns: up to 5 words; common nouns: up to 3 words (relaxed from 2)
+      if (wc <= (isProper ? 5 : 3)) {
         usedSentences.add(s);
-        out.push({ type: "fill", question: wh.question, answer: wh.answer, difficulty: "medium", explanation: `From source: "${s}"` });
+        out.push({ type: "fill", question: wh.question, answer, difficulty: "medium", explanation: `From source: "${s}"` });
         continue;
       }
       // Answer too long — fall through to KWIC
@@ -1097,7 +1127,12 @@ function makeMainIdea(sentences, usedSentences) {
   const available = sentences.filter(s => !usedSentences.has(s));
   if (available.length < 4) return [];
   const mainIdea = available[0];
-  const distractors = available.slice(1, 4);
+  const remaining = available.slice(1);
+  // Pull distractors from the lower half of ranked sentences — top-ranked ones look too similar
+  // to the main idea and make the question ambiguous rather than discriminating.
+  const distractors = remaining.length >= 6
+    ? shuffle(remaining.slice(Math.floor(remaining.length * 0.4))).slice(0, 3)
+    : remaining.slice(0, 3);
   const choices = shuffle([mainIdea, ...distractors]).map(c => c.length > 120 ? c.slice(0, 117) + "..." : c);
   const answerIdx = choices.findIndex(c => c.startsWith(mainIdea.slice(0, 30)));
   usedSentences.add(mainIdea);
@@ -1558,8 +1593,9 @@ function makeCooccurrence(sentences, count, allTerms, usedSentences) {
   }
 
   // Sort by co-occurrence count, highest first
+  const minCoOcc = sentences.length < 20 ? 1 : 2;
   const pairs = Object.entries(coCount)
-    .filter(([, c]) => c >= 2)
+    .filter(([, c]) => c >= minCoOcc)
     .sort((a, b) => b[1] - a[1]);
 
   // Collect unique top concepts per entity (avoid repeating the same entity)
@@ -1747,14 +1783,20 @@ async function makeConceptNetQuestion(sentences, count, tfidfScores, allTerms, u
       .sort((a, b) => (b.weight || 0) - (a.weight || 0));
 
     if (!candidates.length) continue;
-    const edge = candidates[0];
-    const relId = edge.rel["@id"];
-    const answer = edge.end.label.toLowerCase();
-    const questionText = CN_REL[relId](term);
 
-    // Build distractors from same-relation pool, excluding the answer
-    const pool = [...(relPool[relId] || [])].filter(w => w !== answer);
-    if (pool.length < 3) continue;
+    // Try up to 3 candidates — the top-ranked edge may have too few cross-concept distractors
+    let edge = null, relId, answer, questionText, pool;
+    for (const candidate of candidates.slice(0, 3)) {
+      const cRelId = candidate.rel["@id"];
+      const cPool = [...(relPool[cRelId] || [])].filter(w => w !== candidate.end.label.toLowerCase());
+      if (cPool.length >= 3) {
+        edge = candidate; relId = cRelId; pool = cPool;
+        answer = edge.end.label.toLowerCase();
+        questionText = CN_REL[relId](term);
+        break;
+      }
+    }
+    if (!edge) continue;
 
     const cap = w => w.charAt(0).toUpperCase() + w.slice(1);
     const distractors = shuffle(pool).slice(0, 3).map(cap);
@@ -1778,8 +1820,7 @@ async function makeConceptNetQuestion(sentences, count, tfidfScores, allTerms, u
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   if (text.length > 50000) text = text.slice(0, 50000);
-  const sentences = extractSentences(text);
-  const sentencesOrdered = extractSentences(text, { sorted: false });
+  const { sorted: sentences, ordered: sentencesOrdered } = extractSentences(text, { returnBoth: true });
   if (sentences.length < 5) throw new Error("Not enough content to generate questions. Try adding more text.");
 
   const tfidfScores = tfidf(sentences);
@@ -1872,11 +1913,14 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   }
   if (!qs.length) throw new Error("Could not extract enough questions. Try a source with more complete sentences.");
 
-  // Deduplicate by answer value — skip TF/ordering (their answers are "True"/"False" or arrays, not unique content)
+  // Deduplicate by answer value — skip TF/ordering (structural answers) and double_fill (uses answers[])
   const usedAnswerKeys = new Set();
   qs = qs.filter(q => {
     if (q.type === 'tf' || q.type === 'ordering') return true;
-    const answerStr = (typeof q.answer === "number" ? q.choices?.[q.answer] : q.answer) ?? "";
+    // double_fill has no scalar `answer`; use the joined answers array as the key
+    const answerStr = q.type === 'double_fill'
+      ? (q.answers || []).join('|')
+      : (typeof q.answer === "number" ? q.choices?.[q.answer] : q.answer) ?? "";
     const key = String(answerStr).toLowerCase().trim();
     if (!key || usedAnswerKeys.has(key)) return false;
     usedAnswerKeys.add(key);

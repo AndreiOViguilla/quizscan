@@ -146,6 +146,22 @@ export default function HomePage() {
     ).catch(() => {});
   };
 
+  // Token bucket: allow at most 5 quiz stat bumps per 10-minute window per browser.
+  // Prevents casual counter inflation without requiring auth.
+  const canBumpQuiz = () => {
+    const now = Date.now();
+    const WINDOW = 10 * 60 * 1000;
+    const MAX = 5;
+    try {
+      const stored = JSON.parse(localStorage.getItem("qs-quiz-bumps") || "[]");
+      const recent = stored.filter(t => now - t < WINDOW);
+      if (recent.length >= MAX) return false;
+      recent.push(now);
+      localStorage.setItem("qs-quiz-bumps", JSON.stringify(recent));
+      return true;
+    } catch { return true; }
+  };
+
   useEffect(() => {
     const saved = loadDraft();
     if (saved?.length) setDraft(saved);
@@ -253,7 +269,7 @@ export default function HomePage() {
   };
 
   const startQuiz = async (qs) => {
-    bumpStat("quizzes");
+    if (canBumpQuiz()) bumpStat("quizzes");
     setQuestions(qs);
     saveDraft(qs);
     if (!user) {
@@ -326,11 +342,25 @@ export default function HomePage() {
     /\bputragis\b/i,
   ];
 
-  const isInappropriate = (str) =>
-    INAPPROPRIATE_PATTERNS.some(pat => pat.test(String(str || "")));
+  // Strip invisible separators, diacritics, and common leet substitutions so
+  // "f​uck", "fůck", or "f@ck" all match the same patterns below.
+  const ZERO_WIDTH_RE = /[­​-\u200F\u202A-\u202E⁠-⁤﻿]/g;
+  const LEET_MAP = { '@': 'a', '4': 'a', '3': 'e', '1': 'i', '!': 'i', '0': 'o', '$': 's', '5': 's', '+': 't' };
+  const normalizeForFilter = (str) =>
+    String(str || "")
+      .replace(ZERO_WIDTH_RE, "")
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[@41!0$5+]/g, c => LEET_MAP[c] ?? c);
+
+  const isInappropriate = (str) => {
+    const original = String(str || "");
+    const normalized = normalizeForFilter(original);
+    return INAPPROPRIATE_PATTERNS.some(pat => pat.test(original) || pat.test(normalized));
+  };
 
   const sanitizeUserInput = (str, maxLen = 2000) => {
-    let s = String(str || "").substring(0, maxLen).trim();
+    let s = String(str || "").replace(ZERO_WIDTH_RE, "").substring(0, maxLen).trim();
     for (const pat of INJECTION_PATTERNS) s = s.replace(pat, "[…]");
     return s;
   };
@@ -781,8 +811,13 @@ export default function HomePage() {
               value={text} onChange={e => setText(e.target.value)} />
           )}
           {tab === "url" && (
-            <input className="field-input" placeholder="https://example.com/article"
-              value={urlVal} onChange={e => setUrlVal(e.target.value)} />
+            <>
+              <input className="field-input" placeholder="https://example.com/article"
+                value={urlVal} onChange={e => setUrlVal(e.target.value)} />
+              <p style={{ fontSize: 11, opacity: 0.4, marginTop: 6, lineHeight: 1.5 }}>
+                Page content is fetched via a third-party proxy (allorigins.win / corsproxy.io). Do not enter private or sensitive URLs.
+              </p>
+            </>
           )}
           {tab === "youtube" && (
             <input className="field-input" placeholder="https://youtube.com/watch?v=..."

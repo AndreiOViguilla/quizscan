@@ -106,7 +106,9 @@ module.exports = async function handler(req, res) {
   if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests." });
 
   const { action, email, otp } = req.body || {};
-  if (!email || !email.includes("@")) return res.status(400).json({ error: "Valid email required." });
+  if (!email || typeof email !== "string" || email.length > 254 || !email.includes("@")) {
+    return res.status(400).json({ error: "Valid email required." });
+  }
 
   if (action === "send") return handleSend(email, res);
   if (action === "verify") {
