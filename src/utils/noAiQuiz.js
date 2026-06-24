@@ -12,6 +12,22 @@ const GENERIC_BLANK_WORDS = new Set(["used","made","came","took","went","said","
   // Adverbs — grammatically obvious in context, trivially guessable as blanks
   "always","never","usually","sometimes","rarely","often","frequently","generally","normally","typically","commonly","occasionally","regularly","certainly","definitely","probably","possibly","perhaps","maybe","likely","simply","merely","purely","mainly","mostly","nearly","almost","quite","rather","truly","really","deeply","highly","widely","largely","greatly","strongly","quickly","slowly","easily","clearly","finally","eventually","gradually","initially","originally","previously","already","yet","soon","then","now","once","twice","again","also","too","further","however","therefore","thus","hence","instead","otherwise","meanwhile","nevertheless","nonetheless","furthermore","additionally","consequently","accordingly","similarly","likewise","besides","moreover","anyway","elsewhere","everywhere","somewhere","anywhere","nowhere"]);
 
+// ── Datamuse response cache ───────────────────────────────────────────────────
+// Avoids redundant network calls when the same term appears as an answer in
+// multiple questions. Module-level so it persists across the full generation run.
+const _datamuseCache = new Map();
+async function fetchDatamuseCached(url, signal) {
+  if (_datamuseCache.has(url)) return _datamuseCache.get(url);
+  if (_datamuseCache.size > 300) _datamuseCache.clear();
+  try {
+    const res = await fetch(url, signal ? { signal } : {});
+    if (!res.ok) return [];
+    const data = await res.json();
+    _datamuseCache.set(url, data);
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
 // ── Text cleaning ─────────────────────────────────────────────────────────────
 function cleanText(raw) {
   return raw
@@ -600,11 +616,18 @@ function toWhQuestion(sentence) {
 function getDistractors(answer, allTerms, type, sentenceTerms = []) {
   if (type === "year") {
     const y = parseInt(answer);
-    return shuffle([y - 5, y + 5, y - 10, y + 10, y - 1, y + 1].filter(n => n !== y && n > 1000 && n < 2100)).slice(0, 3).map(String);
+    const maxY = new Date().getFullYear();
+    // Avoid ±1 (tests exact recall, not knowledge) and future years (obviously impossible for historical facts)
+    return shuffle([y - 3, y + 3, y - 8, y + 8, y - 15, y + 15, y - 25, y + 25]
+      .filter(n => n !== y && n > 1000 && n <= maxY))
+      .slice(0, 3).map(String);
   }
   if (type === "number") {
     const n = parseFloat(answer.replace(/,/g, ""));
-    return [Math.round(n * 0.5), Math.round(n * 1.5), Math.round(n * 2)].filter(x => x !== n).slice(0, 3).map(String);
+    const d = Math.max(1, Math.round(n * 0.15)); // ±15% delta for less patterned distractors
+    return shuffle([Math.round(n * 0.5), Math.round(n * 0.75), Math.round(n + d), Math.round(n - d), Math.round(n * 1.5)]
+      .filter(x => x > 0 && x !== n))
+      .slice(0, 3).map(String);
   }
   // Common-noun answers: return [] so callers use Datamuse for semantically relevant distractors
   if (/^[a-z]/.test(answer)) return [];
@@ -797,10 +820,9 @@ async function negateWithDatamuse(sentence) {
   for (const { word, index, raw } of shuffle(candidates).slice(0, 3)) {
     try {
       const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-      const res = await fetch(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`, { signal });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const ant = (Array.isArray(data) ? data : []).map(d => d.word).find(w => w && !w.includes(" "));
+      const data = await fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`, signal);
+      if (!data.length) continue;
+      const ant = data.map(d => d.word).find(w => w && !w.includes(" "));
       if (!ant) continue;
       const replacement = raw[0] === raw[0].toUpperCase() ? ant.charAt(0).toUpperCase() + ant.slice(1) : ant;
       return sentence.slice(0, index) + replacement + sentence.slice(index + raw.length);
@@ -816,21 +838,23 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
   const BARE_PRONOUN_SUBJECT = /^(He|She|It|They)\b/;
   // Mid-clause pronoun as main subject after a comma — e.g. "Like X, it was designed..."
   const MID_CLAUSE_PRONOUN = /,\s+(it|he|she|they|them)\s+\b(was|is|were|are|had|has|did|could|would)\b/i;
+  // Target exactly 50/50 instead of random per-sentence coin flip, so a run
+  // never ends up with all True or all False questions.
+  const trueTarget = Math.ceil(count / 2);
+  let trueCount = 0;
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
     const q = s.replace(/[.!?]+$/, "");
     if (!questionOk(q)) continue;
-    if (Math.random() > 0.4) {
-      if (NEGATION.test(s)) continue;
-      if (BARE_PRONOUN_SUBJECT.test(s)) continue;
-      if (MID_CLAUSE_PRONOUN.test(s)) continue;
+    const canBeTrue = !NEGATION.test(s) && !BARE_PRONOUN_SUBJECT.test(s) && !MID_CLAUSE_PRONOUN.test(s);
+    if (trueCount < trueTarget && canBeTrue) {
       usedSentences.add(s);
       out.push({ type: "tf", question: q, answer: "True", difficulty: "easy", explanation: "This statement appears directly in the source." });
+      trueCount++;
     } else {
       // Try antonym swap via Datamuse first for a more believable false statement
-      let neg = typeof negateWithDatamuse === "function" ? await negateWithDatamuse(s) : null;
-      if (!neg) neg = negateSentence(s, allEntities);
+      const neg = await negateWithDatamuse(s) || negateSentence(s, allEntities);
       if (neg && questionOk(neg)) {
         usedSentences.add(s);
         out.push({ type: "tf", question: neg.replace(/[.!?]+$/, ""), answer: "False", difficulty: "medium", explanation: `Correct: "${s}"` });
@@ -867,13 +891,13 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
       if (distractors.length < 3 && !/^[A-Z]/.test(wh.answer) && !/^\d/.test(wh.answer)) {
         try {
           const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-          const [antRes, trgRes, synRes] = await Promise.all([
-            fetch(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(wh.answer.toLowerCase())}&max=5`, { signal }),
-            fetch(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(wh.answer.toLowerCase())}&max=8`, { signal }),
-            fetch(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(wh.answer.toLowerCase())}&max=5`, { signal }),
+          const key = wh.answer.toLowerCase();
+          const [antData, trgData, synData] = await Promise.all([
+            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(key)}&max=5`, signal),
+            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(key)}&max=8`, signal),
+            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(key)}&max=5`, signal),
           ]);
-          const [antData, trgData, synData] = await Promise.all([antRes.ok ? antRes.json() : [], trgRes.ok ? trgRes.json() : [], synRes.ok ? synRes.json() : []]);
-          const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== wh.answer.toLowerCase());
+          const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== key);
           if (apiWords.length >= 3) distractors = shuffle(apiWords).slice(0, 3);
         } catch {}
       }
@@ -897,13 +921,13 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
     if (distractors.length < 3 && !/^[A-Z]/.test(answer) && !/^\d/.test(answer)) {
       try {
         const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-        const [antRes, trgRes, synRes] = await Promise.all([
-          fetch(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(answer.toLowerCase())}&max=5`, { signal }),
-          fetch(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(answer.toLowerCase())}&max=8`, { signal }),
-          fetch(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(answer.toLowerCase())}&max=5`, { signal }),
+        const key = answer.toLowerCase();
+        const [antData, trgData, synData] = await Promise.all([
+          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(key)}&max=5`, signal),
+          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(key)}&max=8`, signal),
+          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(key)}&max=5`, signal),
         ]);
-        const [antData, trgData, synData] = await Promise.all([antRes.ok ? antRes.json() : [], trgRes.ok ? trgRes.json() : [], synRes.ok ? synRes.json() : []]);
-        const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== answer.toLowerCase());
+        const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== key);
         if (apiWords.length >= 3) distractors = shuffle(apiWords).slice(0, 3);
       } catch {}
     }
@@ -1040,15 +1064,10 @@ async function fetchDatamuseDistractors(word, textPool) {
   let apiWords = [];
   try {
     const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
-    const [antRes, trgRes, synRes] = await Promise.all([
-      fetch(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=8`, { signal }),
-      fetch(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(word)}&max=12`, { signal }),
-      fetch(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(word)}&max=8`, { signal }),
-    ]);
     const [antData, trgData, synData] = await Promise.all([
-      antRes.ok ? antRes.json() : Promise.resolve([]),
-      trgRes.ok ? trgRes.json() : Promise.resolve([]),
-      synRes.ok ? synRes.json() : Promise.resolve([]),
+      fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=8`, signal),
+      fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(word)}&max=12`, signal),
+      fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(word)}&max=8`, signal),
     ]);
     // Prioritise antonyms (clearly wrong), then triggers (same topic), then synonyms (close but distinct)
     apiWords = [...antData, ...trgData, ...synData]
@@ -1180,9 +1199,8 @@ async function makeErrorId(sentences, count, usedSentences) {
     for (const { word, index, raw } of shuffle(candidates).slice(0, 4)) {
       try {
         const signal = AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-        const res = await fetch(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`, { signal });
-        if (!res.ok) continue;
-        const data = await res.json();
+        const data = await fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`, signal);
+        if (!data.length) continue;
         const ant = data.map(d => d.word).find(w => w && !w.includes(" "));
         if (!ant) continue;
         const replacement = raw[0] === raw[0].toUpperCase() ? ant.charAt(0).toUpperCase() + ant.slice(1) : ant;
