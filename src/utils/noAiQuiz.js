@@ -678,9 +678,141 @@ function toWhQuestion(sentence) {
   return toWhQuestionNlp(sentence);
 }
 
+// ── POS-tagged word pool ──────────────────────────────────────────────────────
+// Built once per generation run, reused across all question types.
+// Gives getDistractors a grammatically correct fallback pool.
+function buildPosTaggedPool(sentences) {
+  const pool = { NOUN: [], VERB: [], ADJ: [], ADV: [], PROPN: [] };
+  for (const s of sentences) {
+    wink.readDoc(s).tokens().each(t => {
+      const pos = t.out(its.pos);
+      if (!pool[pos]) return;
+      const val = t.out(its.value).toLowerCase();
+      if (val.length < 4 || STOP.has(val) || GENERIC_BLANK_WORDS.has(val)) return;
+      pool[pos].push(val);
+    });
+  }
+  for (const pos of Object.keys(pool)) pool[pos] = [...new Set(pool[pos])];
+  return pool;
+}
+
+function getDistractorsByPos(answer, posPool, count = 3) {
+  let answerPos = null;
+  wink.readDoc(answer).tokens().each(t => { if (!answerPos) answerPos = t.out(its.pos); });
+  if (!answerPos || !posPool[answerPos]) return [];
+  const candidates = posPool[answerPos].filter(w => w !== answer.toLowerCase() && !STOP.has(w));
+  return shuffle(candidates).slice(0, count);
+}
+
+// ── Distractor helpers ────────────────────────────────────────────────────────
+
+// Score each candidate by how many sentences contain it AND a word from the source sentence.
+// Higher score = more topically proximate = harder for students to eliminate by topic.
+function rankDistractorsByProximity(candidates, sourceSentence, sentences) {
+  const srcWords = new Set(
+    sourceSentence.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w))
+  );
+  return candidates
+    .map(c => {
+      const cLow = c.toLowerCase();
+      const coScore = sentences.filter(s => {
+        const sLow = s.toLowerCase();
+        return sLow.includes(cLow) && [...srcWords].some(w => sLow.includes(w));
+      }).length;
+      return { c, coScore };
+    })
+    .sort((a, b) => b.coScore - a.coScore)
+    .map(x => x.c);
+}
+
+// Prefer distractors within ±1 word-count of the answer, so the correct answer
+// can't be identified by being the longest/shortest choice.
+function normalizeLengthDistribution(answer, distractors) {
+  if (!distractors.length) return distractors;
+  const aLen = answer.split(/\s+/).length;
+  const lenMatched = distractors.filter(d => Math.abs(d.split(/\s+/).length - aLen) <= 1);
+  if (lenMatched.length >= 3) return shuffle(lenMatched).slice(0, 3);
+  return [...distractors].sort((a, b) =>
+    Math.abs(a.split(/\s+/).length - aLen) - Math.abs(b.split(/\s+/).length - aLen)
+  ).slice(0, 3);
+}
+
+// Distractors that share TF-IDF "tier" with the answer are in the same semantic field.
+function getSameFieldDistractors(answer, allTerms, tfidfScores, count = 3) {
+  const answerScore = tfidfScores[stem(answer.toLowerCase())] || 0;
+  if (!answerScore) return shuffle(allTerms.filter(t => t !== answer)).slice(0, count);
+  const sameField = allTerms
+    .filter(t => t !== answer && t.length > 2)
+    .map(t => ({ t, score: tfidfScores[stem(t.toLowerCase())] || 0 }))
+    .filter(({ score }) => score > answerScore * 0.3 && score < answerScore * 3)
+    .sort((a, b) => Math.abs(a.score - answerScore) - Math.abs(b.score - answerScore))
+    .map(({ t }) => t);
+  return sameField.length >= count ? shuffle(sameField).slice(0, count)
+    : shuffle(allTerms.filter(t => t !== answer)).slice(0, count);
+}
+
+// Reject questions where context words in the stem give the answer away.
+// Score = fraction of non-stop content words in the question that overlap with the answer.
+function computeLeakageScore(question, answer) {
+  const answerWords = new Set(answer.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+  const qWords = question.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w));
+  if (!qWords.length) return 0;
+  const leaks = qWords.filter(qw => [...answerWords].some(aw => aw.includes(qw) || qw.includes(aw))).length;
+  return leaks / qWords.length;
+}
+
+// Filter distractors that are too semantically similar to the answer (near-synonyms)
+// or completely unrelated (noise). Reuses the existing /api/embed endpoint.
+async function filterDistractorsBySimilarity(answer, candidates, maxSimilarity = 0.82) {
+  if (!candidates.length) return candidates;
+  const toEmbed = [answer, ...candidates.slice(0, 10)];
+  try {
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
+    const res = await fetch('/api/embed', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sentences: toEmbed }), signal,
+    });
+    if (!res.ok) return candidates;
+    const { embeddings } = await res.json();
+    if (!embeddings || embeddings.length !== toEmbed.length) return candidates;
+    const answerEmb = embeddings[0];
+    return candidates.filter((_, i) => {
+      const sim = cosineSimilarity(answerEmb, embeddings[i + 1]);
+      return sim < maxSimilarity && sim > 0.15;
+    });
+  } catch { return candidates; }
+}
+
+// WordNet via Open English WordNet REST API — free, no key, returns coordinate terms
+// (same-level words like oak→elm→pine) which are ideal distractors.
+async function fetchWordNetDistractors(word, pos) {
+  const posMap = { NOUN: 'n', VERB: 'v', ADJ: 'a', ADV: 'r' };
+  const targetPos = posMap[pos] || 'n';
+  try {
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
+    const res = await fetch(`https://en-word.net/json/lemma/${encodeURIComponent(word)}`, { signal });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const synsets = (data.results || []).filter(s => s.pos === targetPos);
+    const candidates = [];
+    for (const synset of synsets.slice(0, 3)) {
+      for (const rel of (synset.relations || [])) {
+        if (!['also', 'similar', 'hypernym', 'hyponym'].includes(rel.type)) continue;
+        try {
+          const rRes = await fetch(`https://en-word.net/json/synset/${rel.id}`, { signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined });
+          if (!rRes.ok) continue;
+          const rData = await rRes.json();
+          candidates.push(...(rData.lemmas || []).map(l => l.toLowerCase()));
+        } catch {}
+      }
+    }
+    return [...new Set(candidates)].filter(w => w !== word && !w.includes(' ') && w.length >= 3 && !DISTRACTOR_BLOCKLIST.has(w));
+  } catch { return []; }
+}
+
 // ── Smart distractor generation ───────────────────────────────────────────────
 // sentenceTerms: proper nouns from the same sentence — used first as more believable wrong answers
-function getDistractors(answer, allTerms, type, sentenceTerms = []) {
+function getDistractors(answer, allTerms, type, sentenceTerms = [], posPool = null, tfidfScores = {}, sentences = []) {
   if (type === "year") {
     const y = parseInt(answer);
     const maxY = new Date().getFullYear();
@@ -706,27 +838,32 @@ function getDistractors(answer, allTerms, type, sentenceTerms = []) {
   const sameS = sentenceTerms.filter(t => t !== answer && t.length > 2);
   if (type === "person") {
     const pool = [...new Set([...sameS, ...allTerms])].filter(t => t !== answer);
-    // Full names first; fall back to single-name proper nouns (e.g. Socrates, Mozart)
     const fullNames = pool.filter(t => /^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(t));
     const singleNames = pool.filter(t => /^[A-Z][a-z]{2,}$/.test(t) && detectEntityType(t) !== "place" && detectEntityType(t) !== "org");
     const people = [...new Set([...fullNames, ...singleNames])];
-    if (people.length >= 3) return shuffle(people).slice(0, 3);
+    if (people.length >= 3) return normalizeLengthDistribution(answer, shuffle(people));
   }
   if (type === "place") {
     const places = [...new Set([...sameS, ...allTerms])].filter(t => detectEntityType(t) === "place" && t !== answer);
-    if (places.length >= 3) return shuffle(places).slice(0, 3);
+    if (places.length >= 3) return normalizeLengthDistribution(answer, shuffle(places));
   }
-  if (sameS.length >= 3) return shuffle(sameS).slice(0, 3);
+  if (sameS.length >= 3) return normalizeLengthDistribution(answer, shuffle(sameS));
   const targetType = detectEntityType(answer);
   if (targetType !== "noun") {
     const sameType = allTerms.filter(t => t !== answer && t.length > 2 && detectEntityType(t) === targetType);
-    if (sameType.length >= 3) return shuffle(sameType).slice(0, 3);
-    // Typed answers (person/place/year/org) with too few same-type distractors produce
-    // misleading questions — callers will skip them rather than use wrong-type terms.
+    if (sameType.length >= 3) return normalizeLengthDistribution(answer, shuffle(sameType));
     return [];
   }
-  // For genuine noun-type answers any other noun in the passage is plausible.
-  return shuffle(allTerms.filter(t => t !== answer && t.length > 2)).slice(0, 3);
+  // For noun-type answers: try TF-IDF same-field distractors, ranked by topic proximity,
+  // then POS-matched pool as final fallback.
+  const fieldPool = getSameFieldDistractors(answer, allTerms, tfidfScores);
+  const ranked = sentences.length ? rankDistractorsByProximity(fieldPool, sentenceTerms[0] || answer, sentences) : fieldPool;
+  if (ranked.length >= 3) return normalizeLengthDistribution(answer, ranked);
+  if (posPool) {
+    const posMatched = getDistractorsByPos(answer, posPool);
+    if (posMatched.length >= 3) return normalizeLengthDistribution(answer, posMatched);
+  }
+  return normalizeLengthDistribution(answer, shuffle(allTerms.filter(t => t !== answer && t.length > 2)));
 }
 
 // ── Better T/F — Named Entity Swapping ───────────────────────────────────────
@@ -880,6 +1017,7 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
       const wc = answer.split(" ").length;
       // Proper nouns: up to 5 words; common nouns: up to 3 words (relaxed from 2)
       if (wc <= (isProper ? 5 : 3)) {
+        if (computeLeakageScore(wh.question, answer) > 0.5) continue;
         usedSentences.add(s);
         out.push({ type: "fill", question: wh.question, answer, difficulty: "medium", explanation: `From source: "${s}"` });
         continue;
@@ -894,6 +1032,7 @@ function makeFill(sentences, count, tfidfScores, usedSentences) {
     if (!kwic) continue;
     const q = `Fill in the blank: "${kwic}"`;
     if (!questionOk(q)) continue;
+    if (computeLeakageScore(q, term) > 0.5) continue;
     usedSentences.add(s);
     out.push({ type: "fill", question: q, answer: term, difficulty: "medium", explanation: `From source: "${s}"` });
   }
@@ -965,7 +1104,7 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
   return shuffle([...trueOut, ...falseOut]);
 }
 
-async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
+async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences, posPool = null) {
   const out = [];
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
@@ -977,31 +1116,26 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
     const def = extractDefinition(s);
     if (def) {
       const defQ = `What is described as "${def.definition}"?`;
-      const defDistractors = allTerms.filter(t => t !== def.subject && t.split(" ").length <= 3);
-      if (questionOk(defQ) && defDistractors.length >= 3) {
-        const choices = shuffle([def.subject, ...shuffle(defDistractors).slice(0, 3)]);
-        usedSentences.add(s);
-        out.push({ type: "mcq", question: defQ, choices, answer: choices.indexOf(def.subject), difficulty: "medium", explanation: `From source: "${s}"` });
-        continue;
+      if (computeLeakageScore(defQ, def.subject) > 0.5) { /* skip */ }
+      else {
+        const defDistractors = allTerms.filter(t => t !== def.subject && t.split(" ").length <= 3);
+        if (questionOk(defQ) && defDistractors.length >= 3) {
+          const choices = shuffle([def.subject, ...shuffle(defDistractors).slice(0, 3)]);
+          usedSentences.add(s);
+          out.push({ type: "mcq", question: defQ, choices, answer: choices.indexOf(def.subject), difficulty: "medium", explanation: `From source: "${s}"` });
+          continue;
+        }
       }
     }
 
     const sStripped = stripEmbeddedClauses(s);
     const wh = toWhQuestion(s) || (sStripped !== s ? toWhQuestion(sStripped) : null);
     if (wh && questionOk(wh.question)) {
-      let distractors = getDistractors(wh.answer, allTerms, wh.type, sTerms);
-      // Datamuse fallback for common-word answers (non-proper-noun, non-number)
+      if (computeLeakageScore(wh.question, wh.answer) > 0.5) continue;
+      const posHint = inferPos(wh.answer.toLowerCase(), s) === "adj" ? "ADJ" : "NOUN";
+      let distractors = getDistractors(wh.answer, allTerms, wh.type, sTerms, posPool, tfidfScores, sentences);
       if (distractors.length < 3 && !/^[A-Z]/.test(wh.answer) && !/^\d/.test(wh.answer)) {
-        try {
-          const key = wh.answer.toLowerCase();
-          const [antData, trgData, synData] = await Promise.all([
-            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(key)}&max=5`),
-            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(key)}&max=8`),
-            fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(key)}&max=5`),
-          ]);
-          const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== key && !DISTRACTOR_BLOCKLIST.has(w));
-          if (apiWords.length >= 3) distractors = shuffle(apiWords).slice(0, 3);
-        } catch {}
+        distractors = await fetchDatamuseDistractors(wh.answer.toLowerCase(), allTerms.filter(t => !/^[A-Z]/.test(t)), posHint);
       }
       if (distractors.length < 3) continue;
       const choices = shuffle([wh.answer, ...distractors.slice(0, 3)]);
@@ -1017,20 +1151,12 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences) {
     if (!kwic) continue;
     const kwicQ = `Choose the correct answer: "${kwic}"`;
     if (!questionOk(kwicQ)) continue;
+    if (computeLeakageScore(kwicQ, answer) > 0.5) continue;
     const type = detectEntityType(answer);
-    let distractors = getDistractors(answer, allTerms, type, sTerms);
-    // Datamuse fallback for common-word answers (non-proper-noun, non-number)
+    const posHint = inferPos(answer.toLowerCase(), s) === "adj" ? "ADJ" : "NOUN";
+    let distractors = getDistractors(answer, allTerms, type, sTerms, posPool, tfidfScores, sentences);
     if (distractors.length < 3 && !/^[A-Z]/.test(answer) && !/^\d/.test(answer)) {
-      try {
-        const key = answer.toLowerCase();
-        const [antData, trgData, synData] = await Promise.all([
-          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(key)}&max=5`),
-          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(key)}&max=8`),
-          fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(key)}&max=5`),
-        ]);
-        const apiWords = [...antData, ...trgData, ...synData].map(d => d.word).filter(w => w && !w.includes(" ") && w !== key && !DISTRACTOR_BLOCKLIST.has(w));
-        if (apiWords.length >= 3) distractors = shuffle(apiWords).slice(0, 3);
-      } catch {}
+      distractors = await fetchDatamuseDistractors(answer.toLowerCase(), allTerms.filter(t => !/^[A-Z]/.test(t)), posHint);
     }
     if (distractors.length < 3) continue;
     const choices = shuffle([answer, ...distractors.slice(0, 3)]);
@@ -1164,32 +1290,38 @@ function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) 
   return out;
 }
 
-// ── Datamuse: antonyms + triggers + synonyms, always mixed with text pool ─────
-async function fetchDatamuseDistractors(word, textPool) {
-  // Proportional bounds: ±40% of word length, floor of 3.
-  // Absolute ±3 chars rejects valid long antonyms for short words and passes
-  // single-char strings for very short words.
+// ── Datamuse: antonyms + triggers + synonyms + ml, WordNet, similarity filter ─
+async function fetchDatamuseDistractors(word, textPool, posHint = null) {
   const lenMin = Math.max(3, Math.round(word.length * 0.6));
   const lenMax = Math.round(word.length * 1.6);
   let apiWords = [];
   try {
-    const [antData, trgData, synData] = await Promise.all([
+    const fetches = [
       fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=8`, 3000),
       fetchDatamuseCached(`/api/lookup?service=datamuse&rel_trg=${encodeURIComponent(word)}&max=12`, 3000),
       fetchDatamuseCached(`/api/lookup?service=datamuse&rel_syn=${encodeURIComponent(word)}&max=8`, 3000),
-    ]);
-    // Prioritise antonyms (clearly wrong), then triggers (same topic), then synonyms (close but distinct)
-    apiWords = [...antData, ...trgData, ...synData]
+      fetchDatamuseCached(`/api/lookup?service=datamuse&ml=${encodeURIComponent(word)}&max=12`, 3000),
+    ];
+    if (posHint === "ADJ") {
+      fetches.push(fetchDatamuseCached(`/api/lookup?service=datamuse&rel_jja=${encodeURIComponent(word)}&max=8`, 3000));
+    } else if (posHint === "NOUN") {
+      fetches.push(fetchDatamuseCached(`/api/lookup?service=datamuse&rel_jjb=${encodeURIComponent(word)}&max=8`, 3000));
+    }
+    const results = await Promise.all(fetches);
+    apiWords = results.flat()
       .map(d => (d.word || "").toLowerCase())
       .filter(w => w && w !== word && !w.includes(" ") && w.length >= lenMin && w.length <= lenMax && !DISTRACTOR_BLOCKLIST.has(w));
   } catch {}
 
+  const wnWords = await fetchWordNetDistractors(word, posHint);
   const textWords = textPool.filter(t => t !== word && t.length >= lenMin && t.length <= lenMax);
-  const combined = [...new Set([...apiWords, ...textWords])];
-  if (combined.length >= 3) return shuffle(combined).slice(0, 3);
+  const combined = [...new Set([...apiWords, ...wnWords, ...textWords])];
+
+  const filtered = await filterDistractorsBySimilarity(word, combined);
+  if (filtered.length >= 3) return normalizeLengthDistribution(word, shuffle(filtered));
 
   const any = textPool.filter(t => t !== word);
-  return shuffle(any).slice(0, 3);
+  return normalizeLengthDistribution(word, shuffle(any));
 }
 
 // ── Vocabulary-in-context questions ──────────────────────────────────────────
@@ -2043,6 +2175,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   const tfidfScores = tfidf(sentences);
   const allTerms = [...new Set(sentences.flatMap(s => extractProperNouns(s)))];
   const usedSentences = new Set();
+  const posPool = buildPosTaggedPool(sentences);
 
   // TextRank: graph-based sentence ranking as fallback (more reliable than raw TF-IDF order)
   let ranked = textRank(sentences);
@@ -2072,7 +2205,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     const depUsed = new Set();
     const depQs = makeDepParseQuestions(parseResults, allTerms, depUsed).filter(q => q.type === 'mcq');
     [...depUsed].forEach(s => usedSentences.add(s));
-    qs = shuffle([...depQs, ...await makeMCQ(ranked, numQ * 2, tfidfScores, allTerms, usedSentences)]);
+    qs = shuffle([...depQs, ...await makeMCQ(ranked, numQ * 2, tfidfScores, allTerms, usedSentences, posPool)]);
   }
   else if (qType === "double_fill") qs = makeDoubleFill(ranked, numQ, tfidfScores, allTerms, usedSentences);
   else if (qType === "ordering") qs = makeOrdering(sentencesOrdered, numQ, usedSentences);
@@ -2085,7 +2218,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     const [tfQs, vocabQs, mcqQs, errorQs, cnQs] = await Promise.all([
       makeTF(ranked, q, allTerms, used1),
       makeVocabContext(ranked, q, tfidfScores, allTerms, used2),
-      makeMCQ(ranked, q, tfidfScores, allTerms, used3),
+      makeMCQ(ranked, q, tfidfScores, allTerms, used3, posPool),
       makeErrorId(ranked, Math.ceil(q / 2), used4),
       makeConceptNetQuestion(ranked, Math.ceil(q / 2), tfidfScores, allTerms, used5),
     ]);
