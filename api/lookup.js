@@ -61,8 +61,52 @@ module.exports = async function handler(req, res) {
     const encoded = encodeURIComponent(concept.toLowerCase().replace(/\s+/g, "_"));
     const n = parseInt(limit, 10) || 20;
     upstreamUrl = `https://api.conceptnet.io/c/en/${encoded}?limit=${n}`;
+  } else if (service === "wordnet") {
+    // en-word.net blocks CORS from browsers — proxy the full lemma+synset expansion server-side.
+    const { word, pos } = req.query;
+    if (!word || /\s/.test(word) || word.length > 40)
+      return res.status(400).json({ error: "Missing or invalid word param" });
+    const posMap = { NOUN: "n", VERB: "v", ADJ: "a", ADV: "r" };
+    const targetPos = posMap[(pos || "NOUN").toUpperCase()] || "n";
+    const lemmaUrl = `https://en-word.net/json/lemma/${encodeURIComponent(word)}`;
+    const lemCached = getCached(lemmaUrl);
+    let lemData = lemCached;
+    if (!lemData) {
+      const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "unknown";
+      if (!checkRateLimit(ip)) return res.status(429).json({ error: "Too many requests." });
+      const ac2 = new AbortController();
+      const t2 = setTimeout(() => ac2.abort(), 3000);
+      try {
+        const lr = await fetch(lemmaUrl, { signal: ac2.signal, headers: { Accept: "application/json" } });
+        clearTimeout(t2);
+        if (!lr.ok) return res.status(200).json({ words: [] });
+        lemData = await lr.json();
+        setCache(lemmaUrl, lemData);
+      } catch { clearTimeout(t2); return res.status(200).json({ words: [] }); }
+    }
+    const synsets = (lemData.results || []).filter(s => s.pos === targetPos).slice(0, 3);
+    const relIds = [...new Set(
+      synsets.flatMap(syn => (syn.relations || [])
+        .filter(r => ["also","similar","hypernym","hyponym"].includes(r.type))
+        .map(r => r.id))
+    )].slice(0, 8);
+    const relResults = await Promise.all(relIds.map(async id => {
+      const synUrl = `https://en-word.net/json/synset/${id}`;
+      const cached = getCached(synUrl);
+      if (cached) return (cached.lemmas || []).map(l => l.toLowerCase());
+      try {
+        const sr = await fetch(synUrl, { signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined, headers: { Accept: "application/json" } });
+        if (!sr.ok) return [];
+        const d = await sr.json();
+        setCache(synUrl, d);
+        return (d.lemmas || []).map(l => l.toLowerCase());
+      } catch { return []; }
+    }));
+    const words = [...new Set(relResults.flat())]
+      .filter(w => w !== word.toLowerCase() && !w.includes(" ") && w.length >= 3);
+    return res.status(200).json({ words });
   } else {
-    return res.status(400).json({ error: "Unknown service. Use service=datamuse or service=conceptnet" });
+    return res.status(400).json({ error: "Unknown service. Use service=datamuse, service=conceptnet, or service=wordnet" });
   }
 
   // Cache hit — serve immediately, no rate limit consumed

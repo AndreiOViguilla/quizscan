@@ -960,35 +960,16 @@ async function fetchWordNetDistractors(word, pos) {
       .filter(w => w !== word.toLowerCase() && !w.includes(' ') && w.length >= 3 && !DISTRACTOR_BLOCKLIST.has(w));
   }
 
-  // Fallback: direct en-word.net (already in CSP connect-src)
-  const posMap = { NOUN: 'n', VERB: 'v', ADJ: 'a', ADV: 'r' };
-  const targetPos = posMap[pos || 'NOUN'] || 'n';
+  // Fallback: proxy via /api/lookup?service=wordnet — server-side, no CORS issues
   try {
-    const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
-    const res = await fetch(`https://en-word.net/json/lemma/${encodeURIComponent(word)}`, { signal });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const synsets = (data.results || []).filter(s => s.pos === targetPos).slice(0, 3);
-    const relIds = [];
-    for (const synset of synsets) {
-      for (const rel of (synset.relations || [])) {
-        if (['also', 'similar', 'hypernym', 'hyponym'].includes(rel.type)) relIds.push(rel.id);
-      }
-    }
-    const relResults = await Promise.all(
-      [...new Set(relIds)].slice(0, 8).map(async id => {
-        try {
-          const r = await fetch(`https://en-word.net/json/synset/${id}`, {
-            signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined,
-          });
-          if (!r.ok) return [];
-          const d = await r.json();
-          return (d.lemmas || []).map(l => l.toLowerCase());
-        } catch { return []; }
-      })
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined;
+    const r = await fetch(
+      `/api/lookup?service=wordnet&word=${encodeURIComponent(word)}&pos=${encodeURIComponent(pos || 'NOUN')}`,
+      { signal }
     );
-    const candidates = relResults.flat();
-    return [...new Set(candidates)].filter(w => w !== word && !w.includes(' ') && w.length >= 3 && !DISTRACTOR_BLOCKLIST.has(w));
+    if (!r.ok) return [];
+    const data = await r.json();
+    return (data.words || []).filter(w => !DISTRACTOR_BLOCKLIST.has(w.toLowerCase()));
   } catch { return []; }
 }
 
@@ -2117,14 +2098,21 @@ function makeListQuestion(sentences, count, allTerms, usedSentences) {
       listMatch[2].trim(),
       listMatch[3].trim().replace(/[.!?,;]+$/, ""),
     ];
-    if (items.some(item => item.length > 35 || item.split(" ").length > 4)) continue;
+    // Max 3 words — 4-word items like "Italy forced Czechoslovakia to" are sentence fragments
+    if (items.some(item => item.length > 35 || item.split(" ").length > 3)) continue;
     if (items.some(item => STOP.has(item.toLowerCase()))) continue;
-    const VERB_IN_ITEM = /\b(conquered|established|reorganized|created|built|founded|wrote|led|defeated|captured|signed|organized|formed|launched|produced|invented|developed|introduced|discovered)\b/i;
+    // Extended verb list — catches action verbs that make items into clause fragments
+    const VERB_IN_ITEM = /\b(conquered|established|reorganized|created|built|founded|wrote|led|defeated|captured|signed|organized|formed|launched|produced|invented|developed|introduced|discovered|forced|required|allowed|made|sent|gave|took|kept|used|held|brought|caused|helped|left|called|named|became)\b/i;
     if (items.some(item => VERB_IN_ITEM.test(item))) continue;
     if (items.some(item => {
       const lastWord = item.split(/\s+/).at(-1).toLowerCase();
       return inferPos(lastWord, "") === "verb";
     })) continue;
+    // Reject adverb-phrase or conjunction starts ("Soon afterwards", "Later", "Also", etc.)
+    const ADV_START = /^(soon|just|also|then|still|later|earlier|while|when|if|as|at|in|on|by|for|with|however|therefore|thus|before|after|already|once|again|often|never|always)\b/i;
+    if (items.some(item => ADV_START.test(item))) continue;
+    // Every item must look like a proper noun phrase — starts with capital, not an adjective alone
+    if (!items.every(item => /^[A-Z][a-z]/.test(item))) continue;
 
     const itemTypes = items.map(detectEntityType);
     const majorityType = [...itemTypes].sort((a, b) =>
@@ -2136,11 +2124,10 @@ function makeListQuestion(sentences, count, allTerms, usedSentences) {
       : shuffle(allTerms.filter(t => !items.includes(t) && t.length > 2))[0];
     if (!distractor) continue;
 
-    // Extract the subject phrase before the verb for the question
+    // Require a clear subject phrase — "the items listed" is too vague to be a useful question
     const categoryMatch = s.match(/^(.{5,55}?)\s+(?:were|was|are|is|included?|consisted of|comprised)/i);
-    const category = categoryMatch
-      ? categoryMatch[1].trim().toLowerCase()
-      : "the items listed";
+    if (!categoryMatch) continue;
+    const category = categoryMatch[1].trim().toLowerCase();
 
     const choices = shuffle([...items, distractor]);
     usedSentences.add(s);
