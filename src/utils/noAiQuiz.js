@@ -238,7 +238,7 @@ function extractSentences(text, { sorted = true, returnBoth = false } = {}) {
     const sortedArr = [...scored].sort((a, b) => b.score - a.score).map(x => x.s);
     // Build POS pool in the same pass — no extra wink parse over all sentences
     const posPool = { NOUN: [], VERB: [], ADJ: [], ADV: [], PROPN: [] };
-    for (const s of resolved) {
+    scored.forEach(({ s }) => {
       wink.readDoc(s).tokens().each(t => {
         const pos = t.out(its.pos);
         if (!posPool[pos]) return;
@@ -246,7 +246,7 @@ function extractSentences(text, { sorted = true, returnBoth = false } = {}) {
         if (val.length < 4 || STOP.has(val) || GENERIC_BLANK_WORDS.has(val)) return;
         posPool[pos].push(val);
       });
-    }
+    });
     for (const pos of Object.keys(posPool)) posPool[pos] = [...new Set(posPool[pos])];
     return { sorted: sortedArr, ordered, raw, posPool };
   }
@@ -709,16 +709,14 @@ function getDistractorsByPos(answer, posPool, count = 3) {
 // Score each candidate by how many sentences contain it AND a word from the source sentence.
 // Higher score = more topically proximate = harder for students to eliminate by topic.
 function rankDistractorsByProximity(candidates, sourceSentence, sentences) {
-  const srcWords = new Set(
-    sourceSentence.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w))
-  );
+  const srcWords = sourceSentence.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w));
+  const sentLows = sentences.map(s => s.toLowerCase());
   return candidates
     .map(c => {
       const cLow = c.toLowerCase();
-      const coScore = sentences.filter(s => {
-        const sLow = s.toLowerCase();
-        return sLow.includes(cLow) && [...srcWords].some(w => sLow.includes(w));
-      }).length;
+      const coScore = sentLows.filter(sLow =>
+        sLow.includes(cLow) && srcWords.some(w => sLow.includes(w))
+      ).length;
       return { c, coScore };
     })
     .sort((a, b) => b.coScore - a.coScore)
@@ -738,7 +736,7 @@ function normalizeLengthDistribution(answer, distractors) {
 }
 
 // Distractors that share TF-IDF "tier" with the answer are in the same semantic field.
-function getSameFieldDistractors(answer, allTerms, tfidfScores, count = 3) {
+function getSameFieldDistractors(answer, allTerms, tfidfScores, count = 6) {
   const answerScore = tfidfScores[stem(answer.toLowerCase())] || 0;
   if (!answerScore) return shuffle(allTerms.filter(t => t !== answer)).slice(0, count);
   const sameField = allTerms
@@ -770,6 +768,7 @@ const _embeddingCache = new Map();
 async function getEmbeddingsCached(words) {
   const uncached = words.filter(w => !_embeddingCache.has(w));
   if (uncached.length) {
+    if (_embeddingCache.size > 500) _embeddingCache.delete(_embeddingCache.keys().next().value);
     try {
       const res = await fetch('/api/embed', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -807,7 +806,7 @@ async function filterDistractorsBySimilarity(answer, candidates, maxSimilarity =
 // (same-level words like oak→elm→pine) which are ideal distractors.
 async function fetchWordNetDistractors(word, pos) {
   const posMap = { NOUN: 'n', VERB: 'v', ADJ: 'a', ADV: 'r' };
-  const targetPos = posMap[pos] || 'n';
+  const targetPos = posMap[pos || 'NOUN'] || 'n';
   try {
     const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
     const res = await fetch(`https://en-word.net/json/lemma/${encodeURIComponent(word)}`, { signal });
@@ -1116,17 +1115,25 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
   const trueQs = trueCandidates.slice(0, trueTarget);
   const usedForTrue = new Set(trueQs.map(x => x.s));
 
-  // Pass 2: collect False candidates from sentences not already used as True.
-  // Quality check applies on both sides — no forced negations.
-  const falseQs = [];
+  // Pass 2: collect all viable negations, rank by strategy quality, then slice.
+  // First-come-first-served on a shuffled list means a "is not" fallback negation can
+  // beat a later Datamuse antonym negation purely by shuffle luck.
+  const negCandidates = [];
   for (const s of shuffled) {
-    if (falseQs.length >= falseTarget) break;
     if (usedSentences.has(s) || usedForTrue.has(s)) continue;
-    const neg = await negateWithDatamuse(s) || negateSentence(s, allEntities);
-    if (neg && questionOk(neg)) {
-      falseQs.push({ s, q: neg.replace(/[.!?]+$/, "") });
-    }
+    const dataN = await negateWithDatamuse(s);
+    const entN = !dataN ? negateSentence(s, allEntities) : null;
+    const neg = dataN || entN;
+    if (!neg || !questionOk(neg)) continue;
+    const quality = dataN ? 4
+      : entN?.match(/\b(first|second|primary)\b/i) ? 3
+      : entN?.match(/[A-Z][a-z]+/) ? 3
+      : entN?.match(/\d{4}/) ? 2
+      : 1;
+    negCandidates.push({ s, q: neg.replace(/[.!?]+$/, ""), quality });
   }
+  negCandidates.sort((a, b) => b.quality - a.quality);
+  const falseQs = negCandidates.slice(0, falseTarget);
 
   [...trueQs, ...falseQs].forEach(x => usedSentences.add(x.s));
   const trueOut = trueQs.map(({ q }) => ({ type: "tf", question: q, answer: "True", difficulty: "easy", explanation: "This statement appears directly in the source." }));
@@ -1307,9 +1314,15 @@ function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) 
 
     const answers = found.map(f => f.term); // lowercase for consistent comparison
     // 4 distractors → 6 total choices (2 correct + 4 wrong).
-    // With only 4 choices and 2 correct, random guessing hits 50% — not discriminating.
-    // 6 choices drops the random baseline to ~13%.
-    const distractors = shuffle(fullTerms.filter(t => !answers.includes(t) && t.length > 3)).slice(0, 4);
+    // Prefer mid-TF-IDF terms (same semantic tier as the answers) over arbitrary top-ranked
+    // global terms, which are often obviously about a different sub-topic.
+    const answerAvgScore = answers.reduce((acc, a) => acc + (tfidfScores[stem(a)] || 0), 0) / answers.length;
+    const midFieldTerms = fullTerms.filter(t => {
+      if (answers.includes(t) || t.length <= 3) return false;
+      const score = tfidfScores[stem(t)] || 0;
+      return score > answerAvgScore * 0.5 && score < answerAvgScore * 2;
+    });
+    const distractors = shuffle(midFieldTerms.length >= 4 ? midFieldTerms : fullTerms.filter(t => !answers.includes(t) && t.length > 3)).slice(0, 4);
     if (distractors.length < 4) continue;
 
     // Capitalize first letter for display; original sentence case preserved via comparison being case-insensitive
@@ -1400,8 +1413,14 @@ async function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSen
     const kwic = makeKwicBlank(s, original);
     if (!kwic) continue;
 
-    // Fetch semantically related words + antonyms from Datamuse; fall back to text pool
-    const distractors = await fetchDatamuseDistractors(matched, fullVocabTerms);
+    // Detect POS so Datamuse and WordNet use the right relation type
+    let vocabPosHint = null;
+    wink.readDoc(matched).tokens().each(t => {
+      if (vocabPosHint) return;
+      const p = t.out(its.pos);
+      if (p === 'ADJ' || p === 'NOUN' || p === 'VERB') vocabPosHint = p;
+    });
+    const distractors = await fetchDatamuseDistractors(matched, fullVocabTerms, vocabPosHint);
     if (distractors.length < 3) continue;
 
     const answerDisplay = original.charAt(0).toUpperCase() + original.slice(1);
@@ -1455,7 +1474,12 @@ function makeOrdering(orderedSentences, count, usedSentences) {
       const correct = [...group];
       let scrambled = shuffle([...group]);
       let tries = 0;
-      while (scrambled.every((s, j) => s === correct[j]) && tries++ < 10) scrambled = shuffle([...group]);
+      const isIdentical = arr => arr.every((s, j) => s === correct[j]);
+      const isReverse = arr => arr.every((s, j) => s === correct[correct.length - 1 - j]);
+      const tooSimilar = arr => arr.filter((s, j) => s !== correct[j]).length < 2;
+      while ((isIdentical(scrambled) || isReverse(scrambled) || tooSimilar(scrambled)) && tries++ < 20) {
+        scrambled = shuffle([...group]);
+      }
       group.forEach(s => usedSentences.add(s));
       const expParts = correct.map((s, j) => `${j + 1}. "${s.slice(0, 50)}..."`).join(" ");
       out.push({ type: "ordering", question: "Arrange these sentences in the correct order:", items: scrambled, answers: correct, difficulty: "hard", explanation: `Correct order: ${expParts}` });
@@ -1494,13 +1518,18 @@ async function makeErrorId(sentences, count, usedSentences) {
       } catch {}
     }
     if (!swapped || !errorWord) continue;
-    // Collect decoys from the ORIGINAL sentence so the swapped antonym isn't in the pool.
-    // Filter on errorOriginal (the pre-swap word) to avoid excluding the antonym's match.
+    // Collect decoys from the ORIGINAL sentence. Exclude the swapped word, stop words,
+    // and any stem-variant of the original (e.g. "peacefully"/"peaceful" when orig="peaceful")
+    // so the answer isn't inferable from a cluster of stem-related words in the choices.
+    const origStem = stem(errorOriginal.toLowerCase());
     const decoys = [];
     const decoyRe = /\b([A-Za-z]{4,})\b/g;
     while ((m = decoyRe.exec(s)) !== null) {
       const w = m[1];
-      if (w.toLowerCase() === errorOriginal.toLowerCase() || STOP.has(w.toLowerCase())) continue;
+      const wLow = w.toLowerCase();
+      if (wLow === errorOriginal.toLowerCase()) continue;
+      if (stem(wLow) === origStem) continue;
+      if (STOP.has(wLow)) continue;
       decoys.push(w);
     }
     if (decoys.length < 3) continue;
@@ -2121,7 +2150,12 @@ async function makeConceptNetQuestion(sentences, count, tfidfScores, allTerms, u
     let edge = null, relId, answer, questionText, pool;
     for (const candidate of candidates.slice(0, 3)) {
       const cRelId = candidate.rel["@id"];
-      const cPool = [...(relPool[cRelId] || [])].filter(w => w !== candidate.end.label.toLowerCase());
+      // Exclude all edge targets for THIS term under this relation — not just the chosen answer.
+      // Other synsets of the same term could appear as "distractors" that are actually correct.
+      const termOwnTargets = new Set(
+        edges.filter(e => e.rel?.["@id"] === cRelId).map(e => (e.end?.label || "").toLowerCase())
+      );
+      const cPool = [...(relPool[cRelId] || [])].filter(w => w !== candidate.end.label.toLowerCase() && !termOwnTargets.has(w));
       if (cPool.length >= 3) {
         const cAnswer = candidate.end.label.toLowerCase();
         // Only use this edge if the answer actually appears in the source text.
@@ -2194,7 +2228,9 @@ function makePronounRefQuestions(rawSentences, resolvedSentences, allTerms, coun
     // subtraction when the referent name already appears elsewhere in the raw sentence.
     const antecedent = findPronounReplacement(raw, resolved);
     if (!antecedent) continue;
-    const distractors = shuffle(allTerms.filter(t => t !== antecedent && /^[A-Z]/.test(t) && t.length > 2)).slice(0, 3);
+    const antecedentType = detectEntityType(antecedent);
+    const typeFiltered = allTerms.filter(t => t !== antecedent && /^[A-Z]/.test(t) && t.length > 2 && detectEntityType(t) === antecedentType);
+    const distractors = shuffle(typeFiltered.length >= 3 ? typeFiltered : allTerms.filter(t => t !== antecedent && /^[A-Z]/.test(t) && t.length > 2)).slice(0, 3);
     if (distractors.length < 2) continue;
     const pronoun = pronounMatch[0];
     const display = raw.length > 100 ? raw.slice(0, 100) + "..." : raw;
