@@ -236,7 +236,19 @@ function extractSentences(text, { sorted = true, returnBoth = false } = {}) {
   if (returnBoth) {
     const ordered = scored.map(x => x.s);
     const sortedArr = [...scored].sort((a, b) => b.score - a.score).map(x => x.s);
-    return { sorted: sortedArr, ordered, raw };
+    // Build POS pool in the same pass — no extra wink parse over all sentences
+    const posPool = { NOUN: [], VERB: [], ADJ: [], ADV: [], PROPN: [] };
+    for (const s of resolved) {
+      wink.readDoc(s).tokens().each(t => {
+        const pos = t.out(its.pos);
+        if (!posPool[pos]) return;
+        const val = t.out(its.value).toLowerCase();
+        if (val.length < 4 || STOP.has(val) || GENERIC_BLANK_WORDS.has(val)) return;
+        posPool[pos].push(val);
+      });
+    }
+    for (const pos of Object.keys(posPool)) posPool[pos] = [...new Set(posPool[pos])];
+    return { sorted: sortedArr, ordered, raw, posPool };
   }
   if (!sorted) return scored.map(x => x.s);
   return scored
@@ -679,26 +691,14 @@ function toWhQuestion(sentence) {
 }
 
 // ── POS-tagged word pool ──────────────────────────────────────────────────────
-// Built once per generation run, reused across all question types.
-// Gives getDistractors a grammatically correct fallback pool.
-function buildPosTaggedPool(sentences) {
-  const pool = { NOUN: [], VERB: [], ADJ: [], ADV: [], PROPN: [] };
-  for (const s of sentences) {
-    wink.readDoc(s).tokens().each(t => {
-      const pos = t.out(its.pos);
-      if (!pool[pos]) return;
-      const val = t.out(its.value).toLowerCase();
-      if (val.length < 4 || STOP.has(val) || GENERIC_BLANK_WORDS.has(val)) return;
-      pool[pos].push(val);
-    });
-  }
-  for (const pos of Object.keys(pool)) pool[pos] = [...new Set(pool[pos])];
-  return pool;
-}
 
 function getDistractorsByPos(answer, posPool, count = 3) {
-  let answerPos = null;
-  wink.readDoc(answer).tokens().each(t => { if (!answerPos) answerPos = t.out(its.pos); });
+  const tokens = [];
+  wink.readDoc(answer).tokens().each(t => tokens.push({ pos: t.out(its.pos), val: t.out(its.value) }));
+  // Head = last NOUN or PROPN; fall back to last token so multi-word phrases like
+  // "ancient Rome" resolve to PROPN rather than the leading adjective.
+  const head = [...tokens].reverse().find(t => t.pos === 'NOUN' || t.pos === 'PROPN') || tokens.at(-1);
+  const answerPos = head?.pos;
   if (!answerPos || !posPool[answerPos]) return [];
   const candidates = posPool[answerPos].filter(w => w !== answer.toLowerCase() && !STOP.has(w));
   return shuffle(candidates).slice(0, count);
@@ -754,33 +754,53 @@ function getSameFieldDistractors(answer, allTerms, tfidfScores, count = 3) {
 // Reject questions where context words in the stem give the answer away.
 // Score = fraction of non-stop content words in the question that overlap with the answer.
 function computeLeakageScore(question, answer) {
-  const answerWords = new Set(answer.toLowerCase().split(/\s+/).filter(w => w.length > 3));
-  const qWords = question.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w));
-  if (!qWords.length) return 0;
-  const leaks = qWords.filter(qw => [...answerWords].some(aw => aw.includes(qw) || qw.includes(aw))).length;
-  return leaks / qWords.length;
+  const answerWords = answer.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w));
+  if (!answerWords.length) return 0;
+  const headWord = answerWords.at(-1);
+  const qWordSet = new Set(question.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w)));
+  let leakScore = 0;
+  for (const aw of answerWords) {
+    if (qWordSet.has(aw)) leakScore += aw === headWord ? 2 : 1;
+  }
+  return leakScore / (1 + answerWords.length);
 }
 
-// Filter distractors that are too semantically similar to the answer (near-synonyms)
-// or completely unrelated (noise). Reuses the existing /api/embed endpoint.
+const _embeddingCache = new Map();
+
+async function getEmbeddingsCached(words) {
+  const uncached = words.filter(w => !_embeddingCache.has(w));
+  if (uncached.length) {
+    try {
+      const res = await fetch('/api/embed', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sentences: uncached }),
+        signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
+      });
+      if (res.ok) {
+        const { embeddings } = await res.json();
+        if (embeddings?.length === uncached.length) {
+          uncached.forEach((w, i) => _embeddingCache.set(w, embeddings[i]));
+        }
+      }
+    } catch {}
+  }
+  return words.map(w => _embeddingCache.get(w) || null);
+}
+
+// Filter distractors that are too semantically similar to the answer (near-synonyms).
+// Uses a module-level embedding cache so repeated words across questions share lookups.
 async function filterDistractorsBySimilarity(answer, candidates, maxSimilarity = 0.82) {
   if (!candidates.length) return candidates;
-  const toEmbed = [answer, ...candidates.slice(0, 10)];
-  try {
-    const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
-    const res = await fetch('/api/embed', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sentences: toEmbed }), signal,
-    });
-    if (!res.ok) return candidates;
-    const { embeddings } = await res.json();
-    if (!embeddings || embeddings.length !== toEmbed.length) return candidates;
-    const answerEmb = embeddings[0];
-    return candidates.filter((_, i) => {
-      const sim = cosineSimilarity(answerEmb, embeddings[i + 1]);
-      return sim < maxSimilarity && sim > 0.15;
-    });
-  } catch { return candidates; }
+  const allWords = [answer, ...candidates.slice(0, 10)];
+  const embeddings = await getEmbeddingsCached(allWords);
+  const answerEmb = embeddings[0];
+  if (!answerEmb) return candidates;
+  return candidates.filter((_, i) => {
+    const emb = embeddings[i + 1];
+    if (!emb) return true;
+    const sim = cosineSimilarity(answerEmb, emb);
+    return sim < maxSimilarity && sim > 0.15;
+  });
 }
 
 // WordNet via Open English WordNet REST API — free, no key, returns coordinate terms
@@ -793,26 +813,34 @@ async function fetchWordNetDistractors(word, pos) {
     const res = await fetch(`https://en-word.net/json/lemma/${encodeURIComponent(word)}`, { signal });
     if (!res.ok) return [];
     const data = await res.json();
-    const synsets = (data.results || []).filter(s => s.pos === targetPos);
-    const candidates = [];
-    for (const synset of synsets.slice(0, 3)) {
+    const synsets = (data.results || []).filter(s => s.pos === targetPos).slice(0, 3);
+    // Collect all relation IDs first, then fetch in parallel
+    const relIds = [];
+    for (const synset of synsets) {
       for (const rel of (synset.relations || [])) {
-        if (!['also', 'similar', 'hypernym', 'hyponym'].includes(rel.type)) continue;
-        try {
-          const rRes = await fetch(`https://en-word.net/json/synset/${rel.id}`, { signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined });
-          if (!rRes.ok) continue;
-          const rData = await rRes.json();
-          candidates.push(...(rData.lemmas || []).map(l => l.toLowerCase()));
-        } catch {}
+        if (['also', 'similar', 'hypernym', 'hyponym'].includes(rel.type)) relIds.push(rel.id);
       }
     }
+    const relResults = await Promise.all(
+      [...new Set(relIds)].slice(0, 8).map(async id => {
+        try {
+          const r = await fetch(`https://en-word.net/json/synset/${id}`, {
+            signal: AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined,
+          });
+          if (!r.ok) return [];
+          const d = await r.json();
+          return (d.lemmas || []).map(l => l.toLowerCase());
+        } catch { return []; }
+      })
+    );
+    const candidates = relResults.flat();
     return [...new Set(candidates)].filter(w => w !== word && !w.includes(' ') && w.length >= 3 && !DISTRACTOR_BLOCKLIST.has(w));
   } catch { return []; }
 }
 
 // ── Smart distractor generation ───────────────────────────────────────────────
 // sentenceTerms: proper nouns from the same sentence — used first as more believable wrong answers
-function getDistractors(answer, allTerms, type, sentenceTerms = [], posPool = null, tfidfScores = {}, sentences = []) {
+function getDistractors(answer, allTerms, type, sentenceTerms = [], posPool = null, tfidfScores = {}, sentences = [], sourceSentence = "") {
   if (type === "year") {
     const y = parseInt(answer);
     const maxY = new Date().getFullYear();
@@ -841,29 +869,31 @@ function getDistractors(answer, allTerms, type, sentenceTerms = [], posPool = nu
     const fullNames = pool.filter(t => /^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(t));
     const singleNames = pool.filter(t => /^[A-Z][a-z]{2,}$/.test(t) && detectEntityType(t) !== "place" && detectEntityType(t) !== "org");
     const people = [...new Set([...fullNames, ...singleNames])];
-    if (people.length >= 3) return normalizeLengthDistribution(answer, shuffle(people));
+    if (people.length >= 3) return shuffle(people).slice(0, 6);
   }
   if (type === "place") {
     const places = [...new Set([...sameS, ...allTerms])].filter(t => detectEntityType(t) === "place" && t !== answer);
-    if (places.length >= 3) return normalizeLengthDistribution(answer, shuffle(places));
+    if (places.length >= 3) return shuffle(places).slice(0, 6);
   }
-  if (sameS.length >= 3) return normalizeLengthDistribution(answer, shuffle(sameS));
+  if (sameS.length >= 3) return shuffle(sameS).slice(0, 6);
   const targetType = detectEntityType(answer);
   if (targetType !== "noun") {
     const sameType = allTerms.filter(t => t !== answer && t.length > 2 && detectEntityType(t) === targetType);
-    if (sameType.length >= 3) return normalizeLengthDistribution(answer, shuffle(sameType));
+    if (sameType.length >= 3) return shuffle(sameType).slice(0, 6);
     return [];
   }
   // For noun-type answers: try TF-IDF same-field distractors, ranked by topic proximity,
   // then POS-matched pool as final fallback.
   const fieldPool = getSameFieldDistractors(answer, allTerms, tfidfScores);
-  const ranked = sentences.length ? rankDistractorsByProximity(fieldPool, sentenceTerms[0] || answer, sentences) : fieldPool;
-  if (ranked.length >= 3) return normalizeLengthDistribution(answer, ranked);
+  const ranked = sentences.length && sourceSentence
+    ? rankDistractorsByProximity(fieldPool, sourceSentence, sentences)
+    : fieldPool;
+  if (ranked.length >= 3) return ranked.slice(0, 6);
   if (posPool) {
     const posMatched = getDistractorsByPos(answer, posPool);
-    if (posMatched.length >= 3) return normalizeLengthDistribution(answer, posMatched);
+    if (posMatched.length >= 3) return posMatched.slice(0, 6);
   }
-  return normalizeLengthDistribution(answer, shuffle(allTerms.filter(t => t !== answer && t.length > 2)));
+  return shuffle(allTerms.filter(t => t !== answer && t.length > 2)).slice(0, 6);
 }
 
 // ── Better T/F — Named Entity Swapping ───────────────────────────────────────
@@ -1133,10 +1163,11 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences, p
     if (wh && questionOk(wh.question)) {
       if (computeLeakageScore(wh.question, wh.answer) > 0.5) continue;
       const posHint = inferPos(wh.answer.toLowerCase(), s) === "adj" ? "ADJ" : "NOUN";
-      let distractors = getDistractors(wh.answer, allTerms, wh.type, sTerms, posPool, tfidfScores, sentences);
+      let distractors = getDistractors(wh.answer, allTerms, wh.type, sTerms, posPool, tfidfScores, sentences, s);
       if (distractors.length < 3 && !/^[A-Z]/.test(wh.answer) && !/^\d/.test(wh.answer)) {
         distractors = await fetchDatamuseDistractors(wh.answer.toLowerCase(), allTerms.filter(t => !/^[A-Z]/.test(t)), posHint);
       }
+      distractors = normalizeLengthDistribution(wh.answer, distractors);
       if (distractors.length < 3) continue;
       const choices = shuffle([wh.answer, ...distractors.slice(0, 3)]);
       usedSentences.add(s);
@@ -1154,10 +1185,11 @@ async function makeMCQ(sentences, count, tfidfScores, allTerms, usedSentences, p
     if (computeLeakageScore(kwicQ, answer) > 0.5) continue;
     const type = detectEntityType(answer);
     const posHint = inferPos(answer.toLowerCase(), s) === "adj" ? "ADJ" : "NOUN";
-    let distractors = getDistractors(answer, allTerms, type, sTerms, posPool, tfidfScores, sentences);
+    let distractors = getDistractors(answer, allTerms, type, sTerms, posPool, tfidfScores, sentences, s);
     if (distractors.length < 3 && !/^[A-Z]/.test(answer) && !/^\d/.test(answer)) {
       distractors = await fetchDatamuseDistractors(answer.toLowerCase(), allTerms.filter(t => !/^[A-Z]/.test(t)), posHint);
     }
+    distractors = normalizeLengthDistribution(answer, distractors);
     if (distractors.length < 3) continue;
     const choices = shuffle([answer, ...distractors.slice(0, 3)]);
     usedSentences.add(s);
@@ -1318,10 +1350,9 @@ async function fetchDatamuseDistractors(word, textPool, posHint = null) {
   const combined = [...new Set([...apiWords, ...wnWords, ...textWords])];
 
   const filtered = await filterDistractorsBySimilarity(word, combined);
-  if (filtered.length >= 3) return normalizeLengthDistribution(word, shuffle(filtered));
+  if (filtered.length >= 3) return shuffle(filtered);
 
-  const any = textPool.filter(t => t !== word);
-  return normalizeLengthDistribution(word, shuffle(any));
+  return shuffle(textPool.filter(t => t !== word));
 }
 
 // ── Vocabulary-in-context questions ──────────────────────────────────────────
@@ -1695,7 +1726,11 @@ function makeContrast(sentences, count, allTerms, usedSentences) {
       // Proper-noun contrast → MCQ
       const question = `According to the passage, what is contrasted with "${leftSubj}"?`;
       if (!questionOk(question)) continue;
-      const distractors = shuffle(allTerms.filter(t => t !== leftSubj && t !== rightSubj && t.length > 2)).slice(0, 3);
+      const rightType = detectEntityType(rightSubj);
+      const typePool = allTerms.filter(t => t !== leftSubj && t !== rightSubj && t.length > 2 && detectEntityType(t) === rightType);
+      const distractors = typePool.length >= 3
+        ? shuffle(typePool).slice(0, 3)
+        : shuffle(allTerms.filter(t => t !== leftSubj && t !== rightSubj && t.length > 2)).slice(0, 3);
       if (distractors.length < 3) continue;
       const choices = shuffle([rightSubj, ...distractors]);
       usedSentences.add(s);
@@ -1819,7 +1854,14 @@ function makeListQuestion(sentences, count, allTerms, usedSentences) {
     if (items.some(item => item.length > 35 || item.split(" ").length > 4)) continue;
     if (items.some(item => STOP.has(item.toLowerCase()))) continue;
 
-    const distractor = shuffle(allTerms.filter(t => !items.includes(t) && t.length > 2))[0];
+    const itemTypes = items.map(detectEntityType);
+    const majorityType = [...itemTypes].sort((a, b) =>
+      itemTypes.filter(t => t === b).length - itemTypes.filter(t => t === a).length
+    )[0];
+    const typePool = allTerms.filter(t => !items.includes(t) && t.length > 2 && detectEntityType(t) === majorityType);
+    const distractor = typePool.length
+      ? shuffle(typePool)[0]
+      : shuffle(allTerms.filter(t => !items.includes(t) && t.length > 2))[0];
     if (!distractor) continue;
 
     // Extract the subject phrase before the verb for the question
@@ -1900,13 +1942,14 @@ function makeCooccurrence(sentences, count, allTerms, usedSentences) {
     );
     if (!sourceSentence) continue;
 
-    // Distractors: top concepts associated with OTHER entities
-    const distractors = [...new Set(
+    // Distractors: top concepts associated with OTHER entities, length-normalized
+    const rawDistractors = [...new Set(
       pairs
         .filter(([k]) => !k.startsWith(`${entity}|||`))
         .map(([k]) => k.split("|||")[1])
         .filter(c => c !== concept)
-    )].slice(0, 6);
+    )].slice(0, 9);
+    const distractors = normalizeLengthDistribution(concept, rawDistractors);
     if (distractors.length < 3) continue;
 
     const cap = w => w.charAt(0).toUpperCase() + w.slice(1);
@@ -1967,6 +2010,7 @@ async function fetchEmbeddings(sentences) {
 // as distractors. Correct answer = the false one.
 function makeNotTrue(sentences, count, allTerms, usedSentences) {
   const out = [];
+  const usedAsDistractor = new Set();
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
     if (usedSentences.has(s)) continue;
@@ -1974,11 +2018,12 @@ function makeNotTrue(sentences, count, allTerms, usedSentences) {
     const falseVer = negateSentence(s, allTerms);
     if (!falseVer || falseVer === s) continue;
     const falseText = falseVer.replace(/[.!?]+$/, "").slice(0, 110);
-    // Three true sentences as distractors (trimmed for display)
-    const trues = shuffle(sentences.filter(x => x !== s && !usedSentences.has(x)))
-      .slice(0, 3)
-      .map(x => x.replace(/[.!?]+$/, "").slice(0, 110));
-    if (trues.length < 3) continue;
+    // Three true sentences as distractors — exclude sentences already used as distractors
+    // in a previous makeNotTrue question to prevent detectable repetition.
+    const trueSentences = shuffle(sentences.filter(x => x !== s && !usedSentences.has(x) && !usedAsDistractor.has(x))).slice(0, 3);
+    if (trueSentences.length < 3) continue;
+    const trues = trueSentences.map(x => x.replace(/[.!?]+$/, "").slice(0, 110));
+    trueSentences.forEach(x => usedAsDistractor.add(x));
     const choices = shuffle([falseText, ...trues]);
     const answer = choices.indexOf(falseText);
     if (answer === -1) continue;
@@ -2148,6 +2193,7 @@ function makePronounRefQuestions(rawSentences, resolvedSentences, allTerms, coun
     // Use word-diff to find what replaced the pronoun — more reliable than entity-set
     // subtraction when the referent name already appears elsewhere in the raw sentence.
     const antecedent = findPronounReplacement(raw, resolved);
+    if (!antecedent) continue;
     const distractors = shuffle(allTerms.filter(t => t !== antecedent && /^[A-Z]/.test(t) && t.length > 2)).slice(0, 3);
     if (distractors.length < 2) continue;
     const pronoun = pronounMatch[0];
@@ -2169,13 +2215,12 @@ function makePronounRefQuestions(rawSentences, resolvedSentences, allTerms, coun
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   if (text.length > 50000) text = text.slice(0, 50000);
-  const { sorted: sentences, ordered: sentencesOrdered, raw: rawSentences } = extractSentences(text, { returnBoth: true });
+  const { sorted: sentences, ordered: sentencesOrdered, raw: rawSentences, posPool } = extractSentences(text, { returnBoth: true });
   if (sentences.length < 5) throw new Error("Not enough content to generate questions. Try adding more text.");
 
   const tfidfScores = tfidf(sentences);
   const allTerms = [...new Set(sentences.flatMap(s => extractProperNouns(s)))];
   const usedSentences = new Set();
-  const posPool = buildPosTaggedPool(sentences);
 
   // TextRank: graph-based sentence ranking as fallback (more reliable than raw TF-IDF order)
   let ranked = textRank(sentences);
