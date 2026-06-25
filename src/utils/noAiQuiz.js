@@ -41,19 +41,25 @@ const DISTRACTOR_BLOCKLIST = new Set([
 ]);
 
 // ── Datamuse response cache ───────────────────────────────────────────────────
-// Avoids redundant network calls when the same term appears as an answer in
-// multiple questions. Module-level so it persists across the full generation run.
 const _datamuseCache = new Map();
-// timeoutMs: per-call timeout so parallel calls each get their own deadline
-// instead of sharing one signal that fires at the same wall-clock instant.
-async function fetchDatamuseCached(url, timeoutMs = 2500) {
+const _datamuse429 = new Set(); // URLs that recently 429'd — skip until auto-cleared
+
+async function fetchDatamuseCached(url, timeoutMs = 2500, retries = 1) {
   if (_datamuseCache.has(url)) return _datamuseCache.get(url);
-  // LRU eviction: delete the oldest entry rather than clearing the whole cache,
-  // which would cause a stampede of simultaneous refetches for parallel calls.
+  if (_datamuse429.has(url)) return [];
   if (_datamuseCache.size > 300) _datamuseCache.delete(_datamuseCache.keys().next().value);
   try {
     const signal = AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined;
     const res = await fetch(url, signal ? { signal } : {});
+    if (res.status === 429) {
+      _datamuse429.add(url);
+      setTimeout(() => _datamuse429.delete(url), 30000);
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, 1000));
+        return fetchDatamuseCached(url, timeoutMs, retries - 1);
+      }
+      return [];
+    }
     if (!res.ok) return [];
     const data = await res.json();
     _datamuseCache.set(url, data);
@@ -135,7 +141,10 @@ function resolveCoref(sentences) {
     const pluralMatch = s.match(/\bThe\s+([A-Za-z][a-z]*s)\b/i);
     if (pluralMatch) lastPlural = pluralMatch[1];
     const thingMatch = s.match(/^([A-Z][A-Za-z\s]{2,25}?)\s+(?:is|was|has|had)\b/);
-    if (thingMatch && !persons.length) lastThing = thingMatch[1].trim();
+    if (thingMatch) {
+      const thingSubj = thingMatch[1].trim();
+      if (detectEntityType(thingSubj) !== "person") lastThing = thingSubj;
+    }
 
     return resolved;
   });
@@ -282,6 +291,10 @@ function tfidf(sentences) {
       scores[w] = (scores[w] || 0) + (c / len) * Math.log(docCount / (df[w] + 1));
     });
   });
+  // Normalize to [0,1] so getSameFieldDistractors band filter works consistently
+  // regardless of document length (short docs get tiny raw scores, long docs get large ones).
+  const maxScore = Math.max(...Object.values(scores), 1);
+  for (const w of Object.keys(scores)) scores[w] /= maxScore;
   return scores;
 }
 
@@ -352,7 +365,7 @@ function extractKeyTerm(sentence, tfidfScores) {
   const nonSubject = allProper.filter(t => t !== subjectGuess);
   const properPool = nonSubject.length ? nonSubject : allProper;
   if (properPool.length) {
-    const scored = properPool.map(w => ({ w, s: tfidfScores[w.toLowerCase()] || 0 })).sort((a, b) => b.s - a.s);
+    const scored = properPool.map(w => ({ w, s: tfidfScores[stem(w.toLowerCase())] || tfidfScores[w.toLowerCase()] || 0 })).sort((a, b) => b.s - a.s);
     return scored[0].w;
   }
   const num = sentence.match(/\b\d[\d,]*(?:\.\d+)?(?:\s*(?:million|billion|thousand|percent|%|km|kg|m\b))?\b/i);
@@ -586,13 +599,14 @@ function makeDepParseQuestion(parseResult) {
   return { question: q, answer: objPhrase, type: 'noun', sentence };
 }
 
-function makeDepParseQuestions(parseResults, allTerms, usedSentences) {
+function makeDepParseQuestions(parseResults, allTerms, usedSentences, posPool = null, tfidfScores = {}, sentences = []) {
   const out = [];
   for (const result of parseResults) {
     const q = makeDepParseQuestion(result);
     if (!q || usedSentences.has(q.sentence)) continue;
     const sTerms = extractProperNouns(q.sentence);
-    const distractors = getDistractors(q.answer, allTerms, q.type, sTerms);
+    let distractors = getDistractors(q.answer, allTerms, q.type, sTerms, posPool, tfidfScores, sentences, q.sentence);
+    distractors = normalizeLengthDistribution(q.answer, distractors);
     usedSentences.add(q.sentence);
     if (distractors.length >= 3) {
       const choices = shuffle([q.answer, ...distractors.slice(0, 3)]);
@@ -986,9 +1000,16 @@ function questionOk(q) {
 // Round-robins across question types so the final quiz isn't a run of same-type questions.
 function interleavedPick(pool, count) {
   if (pool.length <= count) return pool;
+  const KWIC = /^(Choose the correct answer|Fill in the blank):/;
   const byType = {};
-  for (const q of shuffle(pool)) {
+  for (const q of pool) { // preserve arrival order — don't shuffle before bucketing
     (byType[q.type] = byType[q.type] || []).push(q);
+  }
+  // Within each bucket: non-KWIC first (shuffled among themselves), then KWIC
+  for (const t of Object.keys(byType)) {
+    const nonKwic = shuffle(byType[t].filter(q => !KWIC.test(q.question)));
+    const kwic = shuffle(byType[t].filter(q => KWIC.test(q.question)));
+    byType[t] = [...nonKwic, ...kwic];
   }
   const types = shuffle(Object.keys(byType));
   const out = [];
@@ -1100,8 +1121,7 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
   const falseTarget = count - trueTarget;
   const shuffled = shuffle([...sentences]);
 
-  // Pass 1: collect True candidates independently — don't force False onto sentences
-  // that qualified as True just because the True bucket is full.
+  // Pass 1: True candidates
   const trueCandidates = [];
   for (const s of shuffled) {
     if (usedSentences.has(s)) continue;
@@ -1115,24 +1135,51 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
   const trueQs = trueCandidates.slice(0, trueTarget);
   const usedForTrue = new Set(trueQs.map(x => x.s));
 
-  // Pass 2: collect negations, rank by strategy quality, then slice.
-  // Cap attempts so we don't hammer Datamuse for every sentence in a long document.
-  // falseTarget*4 attempts gives enough pool to rank from without excessive API calls.
+  // Pass 2: Batch all adj/adv words across candidate sentences, fetch antonyms in parallel,
+  // then build negations without any serial awaits.
+  const falseCandidateSentences = shuffled.filter(s => !usedSentences.has(s) && !usedForTrue.has(s));
+  const allAdjAdvWords = new Set();
+  const sentenceWordMap = new Map();
+  for (const s of falseCandidateSentences) {
+    const wordRe = /\b([a-z]{4,})\b/gi;
+    let m;
+    const candidates = [];
+    while ((m = wordRe.exec(s)) !== null) {
+      const w = m[1].toLowerCase();
+      if (STOP.has(w)) continue;
+      const pos = inferPos(w, s.slice(0, m.index));
+      if (pos === "adj" || pos === "adv") { candidates.push({ word: w, index: m.index, raw: m[1] }); allAdjAdvWords.add(w); }
+    }
+    if (candidates.length) sentenceWordMap.set(s, candidates);
+  }
+  const antonymMap = new Map();
+  await Promise.all([...allAdjAdvWords].map(async word => {
+    const data = await fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`);
+    const ant = data.map(d => d.word).find(w => w && !w.includes(" "));
+    antonymMap.set(word, ant || null);
+  }));
+
   const negCandidates = [];
-  let attempts = 0;
-  for (const s of shuffled) {
-    if (negCandidates.length >= falseTarget * 3) break; // enough to rank — stop early
-    if (attempts++ >= falseTarget * 4) break;           // hard cap on API calls
-    if (usedSentences.has(s) || usedForTrue.has(s)) continue;
-    const dataN = await negateWithDatamuse(s);
-    const entN = !dataN ? negateSentence(s, allEntities) : null;
-    const neg = dataN || entN;
+  for (const s of falseCandidateSentences) {
+    const wordCandidates = sentenceWordMap.get(s);
+    let negResult = null;
+    if (wordCandidates) {
+      for (const { word, index, raw } of shuffle(wordCandidates).slice(0, 3)) {
+        const ant = antonymMap.get(word);
+        if (!ant) continue;
+        const replacement = raw[0] === raw[0].toUpperCase() ? ant.charAt(0).toUpperCase() + ant.slice(1) : ant;
+        negResult = s.slice(0, index) + replacement + s.slice(index + raw.length);
+        break;
+      }
+    }
+    const entN = !negResult ? negateSentence(s, allEntities) : null;
+    const neg = negResult || entN;
     if (!neg || !questionOk(neg)) continue;
-    const quality = dataN ? 4
-      : entN?.match(/\b(first|second|primary)\b/i) ? 3
-      : entN?.match(/[A-Z][a-z]+/) ? 3
-      : entN?.match(/\d{4}/) ? 2
-      : 1;
+    const hasSwappableEntity = extractProperNouns(s).some(e => allEntities.some(a => a !== e));
+    const hasOrdinal = /\b(first|second|third|primary|main|major|central|leading)\b/i.test(s);
+    const hasYear = /\b\d{4}\b/.test(s);
+    const negStrategy = negResult ? "datamuse" : hasSwappableEntity ? "entity" : hasOrdinal ? "ordinal" : hasYear ? "year" : "verb";
+    const quality = negStrategy === "datamuse" ? 4 : negStrategy === "entity" || negStrategy === "ordinal" ? 3 : negStrategy === "year" ? 2 : 1;
     negCandidates.push({ s, q: neg.replace(/[.!?]+$/, ""), quality });
   }
   negCandidates.sort((a, b) => b.quality - a.quality);
@@ -1237,7 +1284,7 @@ function makeSequence(sentences, count, usedSentences) {
 }
 
 // ── Comparison questions ──────────────────────────────────────────────────────
-function makeComparison(sentences, count, allTerms, usedSentences) {
+function makeComparison(sentences, count, allTerms, usedSentences, posPool = null, tfidfScores = {}) {
   const out = [];
   for (const s of shuffle(sentences)) {
     if (out.length >= count) break;
@@ -1245,7 +1292,8 @@ function makeComparison(sentences, count, allTerms, usedSentences) {
     const cmp = extractComparison(s);
     if (!cmp) continue;
     const sTerms = extractProperNouns(s);
-    const distractors = getDistractors(cmp.answer, allTerms, "noun", sTerms);
+    let distractors = getDistractors(cmp.answer, allTerms, "noun", sTerms, posPool, tfidfScores, sentences, s);
+    distractors = normalizeLengthDistribution(cmp.answer, distractors);
     if (distractors.length < 3) continue;
     const choices = shuffle([cmp.answer, ...distractors.slice(0, 3)]);
     usedSentences.add(s);
@@ -1423,7 +1471,8 @@ async function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSen
       const p = t.out(its.pos);
       if (p === 'ADJ' || p === 'NOUN' || p === 'VERB') vocabPosHint = p;
     });
-    const distractors = await fetchDatamuseDistractors(matched, fullVocabTerms, vocabPosHint);
+    const rawDistractors = await fetchDatamuseDistractors(matched, fullVocabTerms, vocabPosHint);
+    const distractors = normalizeLengthDistribution(matched, rawDistractors).slice(0, 3);
     if (distractors.length < 3) continue;
 
     const answerDisplay = original.charAt(0).toUpperCase() + original.slice(1);
@@ -1494,45 +1543,51 @@ function makeOrdering(orderedSentences, count, usedSentences) {
 // ── Error Identification questions ────────────────────────────────────────────
 async function makeErrorId(sentences, count, usedSentences) {
   const out = [];
-  for (const s of shuffle(sentences)) {
-    if (out.length >= count) break;
+  // Batch all adj/adv words across sentences, fetch antonyms in parallel
+  const allWordsNeeded = new Set();
+  const sentenceCandidateMap = new Map();
+  for (const s of sentences) {
     if (usedSentences.has(s)) continue;
     const wordRe = /\b([a-z]{4,})\b/gi;
-    const candidates = [];
     let m;
+    const candidates = [];
     while ((m = wordRe.exec(s)) !== null) {
       const w = m[1].toLowerCase();
       if (STOP.has(w)) continue;
       const pos = inferPos(w, s.slice(0, m.index));
-      if (pos === "adj" || pos === "adv") candidates.push({ word: w, index: m.index, raw: m[1] });
+      if (pos === "adj" || pos === "adv") { candidates.push({ word: w, index: m.index, raw: m[1] }); allWordsNeeded.add(w); }
     }
-    if (!candidates.length) continue;
+    if (candidates.length) sentenceCandidateMap.set(s, candidates);
+  }
+  const antonymMap = new Map();
+  await Promise.all([...allWordsNeeded].map(async word => {
+    const data = await fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`);
+    const ant = data.map(d => d.word).find(w => w && !w.includes(" "));
+    antonymMap.set(word, ant || null);
+  }));
+
+  for (const s of shuffle(sentences)) {
+    if (out.length >= count) break;
+    if (usedSentences.has(s)) continue;
+    const candidates = sentenceCandidateMap.get(s);
+    if (!candidates) continue;
     let swapped = null, errorWord = null, errorOriginal = null;
     for (const { word, index, raw } of shuffle(candidates).slice(0, 4)) {
-      try {
-        const data = await fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(word)}&max=3`);
-        if (!data.length) continue;
-        const ant = data.map(d => d.word).find(w => w && !w.includes(" "));
-        if (!ant) continue;
-        const replacement = raw[0] === raw[0].toUpperCase() ? ant.charAt(0).toUpperCase() + ant.slice(1) : ant;
-        swapped = s.slice(0, index) + replacement + s.slice(index + raw.length);
-        errorWord = replacement; errorOriginal = raw;
-        break;
-      } catch {}
+      const ant = antonymMap.get(word);
+      if (!ant) continue;
+      const replacement = raw[0] === raw[0].toUpperCase() ? ant.charAt(0).toUpperCase() + ant.slice(1) : ant;
+      swapped = s.slice(0, index) + replacement + s.slice(index + raw.length);
+      errorWord = replacement; errorOriginal = raw;
+      break;
     }
     if (!swapped || !errorWord) continue;
-    // Collect decoys from the ORIGINAL sentence. Exclude the swapped word, stop words,
-    // and any stem-variant of the original (e.g. "peacefully"/"peaceful" when orig="peaceful")
-    // so the answer isn't inferable from a cluster of stem-related words in the choices.
     const origStem = stem(errorOriginal.toLowerCase());
     const decoys = [];
     const decoyRe = /\b([A-Za-z]{4,})\b/g;
+    let m;
     while ((m = decoyRe.exec(s)) !== null) {
-      const w = m[1];
-      const wLow = w.toLowerCase();
-      if (wLow === errorOriginal.toLowerCase()) continue;
-      if (stem(wLow) === origStem) continue;
-      if (STOP.has(wLow)) continue;
+      const w = m[1], wLow = w.toLowerCase();
+      if (wLow === errorOriginal.toLowerCase() || stem(wLow) === origStem || STOP.has(wLow)) continue;
       decoys.push(w);
     }
     if (decoys.length < 3) continue;
@@ -1760,9 +1815,10 @@ function makeContrast(sentences, count, allTerms, usedSentences) {
       if (!questionOk(question)) continue;
       const rightType = detectEntityType(rightSubj);
       const typePool = allTerms.filter(t => t !== leftSubj && t !== rightSubj && t.length > 2 && detectEntityType(t) === rightType);
-      const distractors = typePool.length >= 3
-        ? shuffle(typePool).slice(0, 3)
-        : shuffle(allTerms.filter(t => t !== leftSubj && t !== rightSubj && t.length > 2)).slice(0, 3);
+      const rawDistr = typePool.length >= 3
+        ? shuffle(typePool).slice(0, 6)
+        : shuffle(allTerms.filter(t => t !== leftSubj && t !== rightSubj && t.length > 2)).slice(0, 6);
+      const distractors = normalizeLengthDistribution(rightSubj, rawDistr);
       if (distractors.length < 3) continue;
       const choices = shuffle([rightSubj, ...distractors]);
       usedSentences.add(s);
@@ -1885,6 +1941,12 @@ function makeListQuestion(sentences, count, allTerms, usedSentences) {
     ];
     if (items.some(item => item.length > 35 || item.split(" ").length > 4)) continue;
     if (items.some(item => STOP.has(item.toLowerCase()))) continue;
+    const VERB_IN_ITEM = /\b(conquered|established|reorganized|created|built|founded|wrote|led|defeated|captured|signed|organized|formed|launched|produced|invented|developed|introduced|discovered)\b/i;
+    if (items.some(item => VERB_IN_ITEM.test(item))) continue;
+    if (items.some(item => {
+      const lastWord = item.split(/\s+/).at(-1).toLowerCase();
+      return inferPos(lastWord, "") === "verb";
+    })) continue;
 
     const itemTypes = items.map(detectEntityType);
     const majorityType = [...itemTypes].sort((a, b) =>
@@ -1974,13 +2036,24 @@ function makeCooccurrence(sentences, count, allTerms, usedSentences) {
     );
     if (!sourceSentence) continue;
 
-    // Distractors: top concepts associated with OTHER entities, length-normalized
-    const rawDistractors = [...new Set(
-      pairs
-        .filter(([k]) => !k.startsWith(`${entity}|||`))
-        .map(([k]) => k.split("|||")[1])
-        .filter(c => c !== concept)
-    )].slice(0, 9);
+    // Distractors: round-robin across different other entities to prevent single-cluster clumping
+    const distractorsByEntity = {};
+    for (const [k] of pairs) {
+      const [e, c] = k.split("|||");
+      if (e === entity || c === concept) continue;
+      if (!distractorsByEntity[e]) distractorsByEntity[e] = [];
+      distractorsByEntity[e].push(c);
+    }
+    const entityKeys = shuffle(Object.keys(distractorsByEntity));
+    const rawDistractors = [];
+    let rnd = 0;
+    while (rawDistractors.length < 9 && entityKeys.some(e => rnd < (distractorsByEntity[e]?.length || 0))) {
+      for (const e of entityKeys) {
+        if (rawDistractors.length >= 9) break;
+        if (rnd < (distractorsByEntity[e]?.length || 0)) rawDistractors.push(distractorsByEntity[e][rnd]);
+      }
+      rnd++;
+    }
     const distractors = normalizeLengthDistribution(concept, rawDistractors);
     if (distractors.length < 3) continue;
 
@@ -2054,7 +2127,11 @@ function makeNotTrue(sentences, count, allTerms, usedSentences) {
     // in a previous makeNotTrue question to prevent detectable repetition.
     const trueSentences = shuffle(sentences.filter(x => x !== s && !usedSentences.has(x) && !usedAsDistractor.has(x))).slice(0, 3);
     if (trueSentences.length < 3) continue;
-    const trues = trueSentences.map(x => x.replace(/[.!?]+$/, "").slice(0, 110));
+    const targetLen = Math.min(110, Math.round(falseText.length * 1.2));
+    const trues = trueSentences.map(x => {
+      const t = x.replace(/[.!?]+$/, "");
+      return t.length > targetLen ? t.slice(0, targetLen - 3) + "..." : t;
+    });
     trueSentences.forEach(x => usedAsDistractor.add(x));
     const choices = shuffle([falseText, ...trues]);
     const answer = choices.indexOf(falseText);
@@ -2251,6 +2328,40 @@ function makePronounRefQuestions(rawSentences, resolvedSentences, allTerms, coun
   return out;
 }
 
+// ── Datamuse pre-warm ─────────────────────────────────────────────────────────
+// Batch-fetch antonyms + ml relations for the top vocab and adj/adv words upfront,
+// so all per-question Datamuse calls hit the cache instead of firing serially.
+async function prewarmDatamuseCache(sentences, tfidfScores, allTerms) {
+  const properLower = new Set(allTerms.flatMap(t => t.toLowerCase().split(/\s+/)));
+  const vocabCandidates = [...new Set(
+    sentences.flatMap(s =>
+      (s.toLowerCase().match(/\b[a-z]{4,}\b/g) || [])
+        .filter(w => !STOP.has(w) && !properLower.has(w) && !GENERIC_BLANK_WORDS.has(w))
+    )
+  )];
+  const topVocab = vocabCandidates
+    .map(w => ({ w, score: tfidfScores[stem(w)] || 0 }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 20).map(x => x.w);
+  const adjAdvWords = [...new Set(
+    sentences.flatMap(s => {
+      const matches = [];
+      const wordRe = /\b([a-z]{4,})\b/gi;
+      let m;
+      while ((m = wordRe.exec(s)) !== null) {
+        const w = m[1].toLowerCase();
+        if (!STOP.has(w) && (inferPos(w, "") === "adj" || inferPos(w, "") === "adv")) matches.push(w);
+      }
+      return matches;
+    })
+  )].slice(0, 30);
+  const allWords = [...new Set([...topVocab, ...adjAdvWords])];
+  await Promise.all(allWords.map(w => Promise.all([
+    fetchDatamuseCached(`/api/lookup?service=datamuse&rel_ant=${encodeURIComponent(w)}&max=8`, 3000),
+    fetchDatamuseCached(`/api/lookup?service=datamuse&ml=${encodeURIComponent(w)}&max=12`, 3000),
+  ])));
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   if (text.length > 50000) text = text.slice(0, 50000);
@@ -2259,10 +2370,16 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
 
   const tfidfScores = tfidf(sentences);
   const allTerms = [...new Set(sentences.flatMap(s => extractProperNouns(s)))];
+  // Years from the text are better distractors for year-type questions than computed ±deltas
+  const allYears = [...new Set(sentences.flatMap(s => [...s.matchAll(/\b(1[3-9]\d{2}|20[0-2]\d)\b/g)].map(m => m[1])))];
+  const allTermsWithYears = [...allTerms, ...allYears];
   const usedSentences = new Set();
 
   // TextRank: graph-based sentence ranking as fallback (more reliable than raw TF-IDF order)
   let ranked = textRank(sentences);
+
+  // Pre-warm Datamuse cache before generators fire — turns N serial calls into one parallel batch
+  await prewarmDatamuseCache(ranked.slice(0, 30), tfidfScores, allTerms);
 
   // Neural re-ranking + spaCy dep parse run in parallel
   const batch = ranked.slice(0, 40);
@@ -2280,16 +2397,16 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   let qs;
   if (qType === "fill") {
     const depUsed = new Set();
-    const depQs = makeDepParseQuestions(parseResults, allTerms, depUsed);
+    const depQs = makeDepParseQuestions(parseResults, allTermsWithYears, depUsed, posPool, tfidfScores, ranked);
     [...depUsed].forEach(s => usedSentences.add(s));
     qs = shuffle([...depQs, ...makeFill(ranked, numQ * 2, tfidfScores, usedSentences)]);
   }
-  else if (qType === "tf") qs = await makeTF(ranked, numQ * 2, allTerms, usedSentences);
+  else if (qType === "tf") qs = await makeTF(ranked, numQ * 2, allTermsWithYears, usedSentences);
   else if (qType === "mcq") {
     const depUsed = new Set();
-    const depQs = makeDepParseQuestions(parseResults, allTerms, depUsed).filter(q => q.type === 'mcq');
+    const depQs = makeDepParseQuestions(parseResults, allTermsWithYears, depUsed, posPool, tfidfScores, ranked).filter(q => q.type === 'mcq');
     [...depUsed].forEach(s => usedSentences.add(s));
-    qs = shuffle([...depQs, ...await makeMCQ(ranked, numQ * 2, tfidfScores, allTerms, usedSentences, posPool)]);
+    qs = shuffle([...depQs, ...await makeMCQ(ranked, numQ * 2, tfidfScores, allTermsWithYears, usedSentences, posPool)]);
   }
   else if (qType === "double_fill") qs = makeDoubleFill(ranked, numQ, tfidfScores, allTerms, usedSentences);
   else if (qType === "ordering") qs = makeOrdering(sentencesOrdered, numQ, usedSentences);
@@ -2300,16 +2417,16 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     // Each parallel function gets its own usedSentences to prevent mid-await races
     const used1 = new Set(), used2 = new Set(), used3 = new Set(), used4 = new Set(), used5 = new Set();
     const [tfQs, vocabQs, mcqQs, errorQs, cnQs] = await Promise.all([
-      makeTF(ranked, q, allTerms, used1),
-      makeVocabContext(ranked, q, tfidfScores, allTerms, used2),
-      makeMCQ(ranked, q, tfidfScores, allTerms, used3, posPool),
+      makeTF(ranked, q, allTermsWithYears, used1),
+      makeVocabContext(ranked, q, tfidfScores, allTermsWithYears, used2),
+      makeMCQ(ranked, q, tfidfScores, allTermsWithYears, used3, posPool),
       makeErrorId(ranked, Math.ceil(q / 2), used4),
-      makeConceptNetQuestion(ranked, Math.ceil(q / 2), tfidfScores, allTerms, used5),
+      makeConceptNetQuestion(ranked, Math.ceil(q / 2), tfidfScores, allTermsWithYears, used5),
     ]);
     // Merge into shared set so sequential builders below don't reuse these sentences
     [...used1, ...used2, ...used3, ...used4, ...used5].forEach(s => usedSentences.add(s));
     const depUsed = new Set();
-    const depQs = makeDepParseQuestions(parseResults, allTerms, depUsed);
+    const depQs = makeDepParseQuestions(parseResults, allTermsWithYears, depUsed, posPool, tfidfScores, ranked);
     [...depUsed].forEach(s => usedSentences.add(s));
     const pool = shuffle([
       ...mcqQs,
@@ -2318,7 +2435,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
       ...makeFill(ranked, q, tfidfScores, usedSentences),
       ...makeCauseEffect(ranked, q, usedSentences),
       ...makeSequence(ranked, q, usedSentences),
-      ...makeComparison(ranked, q, allTerms, usedSentences),
+      ...makeComparison(ranked, q, allTermsWithYears, usedSentences, posPool, tfidfScores),
       ...makeDoubleFill(ranked, q, tfidfScores, allTerms, usedSentences),
       ...makeOrdering(sentencesOrdered, Math.ceil(q / 2), usedSentences),
       ...makeMainIdea(ranked, usedSentences, embeddings, embeddings ? computeCentroid(embeddings) : null),
