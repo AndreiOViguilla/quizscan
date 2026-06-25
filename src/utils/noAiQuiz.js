@@ -815,10 +815,13 @@ function computeLeakageScore(question, answer) {
   const answerWords = answer.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w));
   if (!answerWords.length) return 0;
   const headWord = answerWords.at(-1);
-  const qWordSet = new Set(question.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w)));
+  const qWords = question.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w));
+  const qWordSet = new Set(qWords);
+  const qStemSet = new Set(qWords.map(stem));
   let leakScore = 0;
   for (const aw of answerWords) {
-    if (qWordSet.has(aw)) leakScore += aw === headWord ? 2 : 1;
+    // Exact match OR stem match ("conquered" in Q with "conquest" as answer)
+    if (qWordSet.has(aw) || qStemSet.has(stem(aw))) leakScore += aw === headWord ? 2 : 1;
   }
   return leakScore / (1 + answerWords.length);
 }
@@ -907,7 +910,8 @@ function getDistractors(answer, allTerms, type, sentenceTerms = [], posPool = nu
     // plausible to a student who read the passage, unlike fixed ±delta values.
     const textYears = [...new Set([...allTerms, ...sentenceTerms])]
       .filter(t => /^\d{4}$/.test(t) && parseInt(t) !== y && parseInt(t) > 1000 && parseInt(t) <= maxY);
-    if (textYears.length >= 3) return shuffle(textYears).slice(0, 3);
+    // Sort by proximity to the correct year — closest years are hardest to distinguish.
+    if (textYears.length >= 3) return textYears.sort((a, b) => Math.abs(parseInt(a) - y) - Math.abs(parseInt(b) - y)).slice(0, 3);
     const computed = shuffle([y - 3, y + 3, y - 8, y + 8, y - 15, y + 15, y - 25, y + 25]
       .filter(n => n !== y && n > 1000 && n <= maxY)).map(String);
     return [...new Set([...textYears, ...computed])].slice(0, 3);
@@ -1043,20 +1047,34 @@ function questionOk(q) {
 }
 
 // ── Diversity-aware question picker ──────────────────────────────────────────
-// Round-robins across question types so the final quiz isn't a run of same-type questions.
+// Round-robins across question subtypes so the final quiz isn't a run of same-format questions.
+// MCQ questions are split into subtypes (wh, definition, KWIC, contrast, pronoun…) so
+// 4 wh-questions never appear consecutively even though all have type === "mcq".
+function getQuestionSubtype(q) {
+  if (q.type !== 'mcq') return q.type;
+  const qt = q.question;
+  if (/^(Choose the correct answer|Fill in the blank):/.test(qt)) return 'mcq_kwic';
+  if (/^What is described as/.test(qt)) return 'mcq_def';
+  if (/^Which sentence best states/.test(qt)) return 'mcq_main';
+  if (/^Which concept is most associated/.test(qt)) return 'mcq_cooc';
+  if (/who does .+ refer to/i.test(qt)) return 'mcq_pronoun';
+  if (/^According to the passage, what is contrasted/.test(qt)) return 'mcq_contrast';
+  if (/^Which of the following was NOT/.test(qt)) return 'mcq_list';
+  if (/^Which of the following is NOT stated/.test(qt)) return 'mcq_nottrue';
+  if (/^Which of the following events happened/.test(qt)) return 'mcq_timeline';
+  if (/^Which word best fits/.test(qt)) return 'mcq_vocab';
+  return 'mcq_wh'; // wh-questions, passive-by, appositive, known-for, etc.
+}
+
 function interleavedPick(pool, count) {
   if (pool.length <= count) return pool;
-  const KWIC = /^(Choose the correct answer|Fill in the blank):/;
   const byType = {};
   for (const q of pool) { // preserve arrival order — don't shuffle before bucketing
-    (byType[q.type] = byType[q.type] || []).push(q);
+    const key = getQuestionSubtype(q);
+    (byType[key] = byType[key] || []).push(q);
   }
-  // Within each bucket: non-KWIC first (shuffled among themselves), then KWIC
-  for (const t of Object.keys(byType)) {
-    const nonKwic = shuffle(byType[t].filter(q => !KWIC.test(q.question)));
-    const kwic = shuffle(byType[t].filter(q => KWIC.test(q.question)));
-    byType[t] = [...nonKwic, ...kwic];
-  }
+  // Within each bucket: shuffle for variety
+  for (const t of Object.keys(byType)) byType[t] = shuffle(byType[t]);
   const types = shuffle(Object.keys(byType));
   const out = [];
   let round = 0;
@@ -1165,11 +1183,11 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
 
   const trueTarget = Math.ceil(count / 2);
   const falseTarget = count - trueTarget;
-  const shuffled = shuffle([...sentences]);
 
-  // Pass 1: True candidates
+  // Pass 1: True candidates — use ranked order (TextRank/neural quality) so definitions,
+  // proper-noun-rich, causal sentences are preferred over arbitrary ones.
   const trueCandidates = [];
-  for (const s of shuffled) {
+  for (const s of sentences) {
     if (usedSentences.has(s)) continue;
     const q = s.replace(/[.!?]+$/, "");
     if (!questionOk(q)) continue;
@@ -1183,7 +1201,8 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
 
   // Pass 2: Batch all adj/adv words across candidate sentences, fetch antonyms in parallel,
   // then build negations without any serial awaits.
-  const falseCandidateSentences = shuffled.filter(s => !usedSentences.has(s) && !usedForTrue.has(s));
+  // False candidates: shuffle for variety so repeated calls negate different sentences.
+  const falseCandidateSentences = shuffle([...sentences]).filter(s => !usedSentences.has(s) && !usedForTrue.has(s));
   const allAdjAdvWords = new Set();
   const sentenceWordMap = new Map();
   for (const s of falseCandidateSentences) {
@@ -1436,6 +1455,8 @@ function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) 
 async function fetchDatamuseDistractors(word, textPool, posHint = null) {
   const lenMin = Math.max(3, Math.round(word.length * 0.6));
   const lenMax = Math.round(word.length * 1.6);
+  // Start WordNet early so it runs in parallel with the Datamuse batch below.
+  const wnFetch = fetchWordNetDistractors(word, posHint);
   let apiWords = [];
   try {
     const fetches = [
@@ -1455,7 +1476,8 @@ async function fetchDatamuseDistractors(word, textPool, posHint = null) {
       .filter(w => w && w !== word && !w.includes(" ") && w.length >= lenMin && w.length <= lenMax && !DISTRACTOR_BLOCKLIST.has(w));
   } catch {}
 
-  const wnWords = await fetchWordNetDistractors(word, posHint);
+  // wnFetch was started before the try block so it overlaps with Datamuse
+  const wnWords = await wnFetch;
   const textWords = textPool.filter(t => t !== word && t.length >= lenMin && t.length <= lenMax);
   const combined = [...new Set([...apiWords, ...wnWords, ...textWords])];
 
@@ -1550,8 +1572,11 @@ function makeMainIdea(sentences, usedSentences, embeddings = null, centroid = nu
   const distractors = remaining.length >= 6
     ? shuffle(remaining.slice(Math.floor(remaining.length * 0.4))).slice(0, 3)
     : remaining.slice(0, 3);
-  const choices = shuffle([mainIdea, ...distractors]).map(c => c.length > 120 ? c.slice(0, 117) + "..." : c);
-  const answerIdx = choices.findIndex(c => c.startsWith(mainIdea.slice(0, 30)));
+  // Truncate to display length BEFORE shuffling so indexOf finds the exact string.
+  const truncate = s => s.length > 120 ? s.slice(0, 117) + "..." : s;
+  const mainIdeaShort = truncate(mainIdea);
+  const choices = shuffle([mainIdeaShort, ...distractors.map(truncate)]);
+  const answerIdx = choices.indexOf(mainIdeaShort);
   usedSentences.add(mainIdea);
   return [{ type: "mcq", question: "Which sentence best states the main idea of the passage?", choices, answer: answerIdx, difficulty: "medium", explanation: `Main idea: "${mainIdea}"` }];
 }
@@ -1721,15 +1746,17 @@ function makeQuantityQuestion(sentences, count, usedSentences) {
     const pctM = s.match(PERCENT);
     if (pctM) {
       const n = parseFloat(pctM[1]);
-      const unit = pctM[2];
+      // Preserve the original separator (space or none) so all choices match the source format:
+      // "45 percent" → fmtUnit = " percent"; "45%" → fmtUnit = "%"
+      const fmtUnit = pctM[0].slice(pctM[1].length); // everything after the digits
       const delta = Math.max(5, Math.round(n * 0.3));
-      const q = s.replace(pctM[0], `____${unit}`).replace(/[.!?]+$/, "");
+      const q = s.replace(pctM[0], `____${fmtUnit.trim()}`).replace(/[.!?]+$/, "");
       if (!questionOk(q)) continue;
       const choices = shuffle([
         pctM[0],
-        `${Math.round(Math.max(0, n - delta))}${unit}`,
-        `${Math.round(n + delta)}${unit}`,
-        `${Math.round(n * 2 > 100 ? n / 2 : n * 2)}${unit}`,
+        `${Math.round(Math.max(0, n - delta))}${fmtUnit}`,
+        `${Math.round(n + delta)}${fmtUnit}`,
+        `${Math.round(n * 2 > 100 ? n / 2 : n * 2)}${fmtUnit}`,
       ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 4));
       if (choices.length < 3) continue;
       usedSentences.add(s);
@@ -2419,6 +2446,28 @@ async function prewarmDatamuseCache(sentences, tfidfScores, allTerms) {
   ])));
 }
 
+// ── Dynamic difficulty ────────────────────────────────────────────────────────
+// Overrides hardcoded difficulty labels using the answer's TF-IDF score:
+//   high score  → central / frequently-discussed term → easier to recall → "easy"
+//   medium score → moderately specific term → "medium"
+//   low / zero  → obscure or peripheral term → harder to recall → "hard"
+// Applied as a single post-processing pass so individual builders don't need tfidfScores.
+function applyDynamicDifficulty(questions, tfidfScores) {
+  return questions.map(q => {
+    // Structural question types get fixed difficulty — don't override
+    if (q.type === 'ordering' || q.type === 'error_id') return q;
+    const answerStr = q.type === 'double_fill'
+      ? (q.answers || [])[0] || ''
+      : q.type === 'tf'
+        ? null // T/F: true=easy, false=medium — keep existing label
+        : (typeof q.answer === 'number' ? q.choices?.[q.answer] : q.answer) || '';
+    if (!answerStr) return q;
+    const score = tfidfScores[stem(answerStr.toLowerCase())] || tfidfScores[answerStr.toLowerCase()] || 0;
+    const difficulty = score > 0.65 ? 'easy' : score > 0.25 ? 'medium' : 'hard';
+    return { ...q, difficulty };
+  });
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   if (text.length > 50000) text = text.slice(0, 50000);
@@ -2552,6 +2601,9 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     qs = interleavedPick(srcDedupedPool, Math.min(srcDedupedPool.length, numQ + 8));
   }
   if (!qs.length) throw new Error("Could not extract enough questions. Try a source with more complete sentences.");
+
+  // Replace hardcoded difficulty labels with TF-IDF-derived scores
+  qs = applyDynamicDifficulty(qs, tfidfScores);
 
   // Deduplicate by answer value — skip TF/ordering (structural answers) and double_fill (uses answers[])
   const usedAnswerKeys = new Set();
