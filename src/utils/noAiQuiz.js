@@ -682,7 +682,9 @@ function toWhQuestion(sentence) {
   if (yearMatch && allYears.length === 1) {
     const before = sentence.slice(0, sentence.indexOf(yearMatch[0]));
     const monthPrecedes = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{0,2}\s*$/.test(before);
-    const replacement = yearMatch[1] ? "in what year" : monthPrecedes ? "of what year" : "what year";
+    // When no preposition is present, yearMatch[0] includes the leading space consumed
+    // by \s* — the replacement must include a leading space to avoid "Februarywhat year".
+    const replacement = yearMatch[1] ? "in what year" : monthPrecedes ? " of what year" : " what year";
     const q = sentence.replace(yearMatch[0], replacement).replace(/[.!?]+$/, "");
     return { question: q.charAt(0).toUpperCase() + q.slice(1) + "?", answer: yearMatch[2], type: "year" };
   }
@@ -1825,8 +1827,11 @@ function makeContrast(sentences, count, allTerms, usedSentences) {
       out.push({ type: "mcq", question, choices, answer: choices.indexOf(rightSubj), difficulty: "medium", explanation: `From source: "${s}"` });
     } else {
       // Common-noun or abstract contrast → fill question
+      // Reject if the right side is a long clause — trimAnswer would truncate mid-sentence
+      // producing a partial-clause answer that's ungradeable (e.g. "the state of war…").
+      if (right.split(" ").length > 8) continue;
       const shortRight = trimAnswer(right, 60);
-      if (shortRight.length < 5) continue;
+      if (shortRight.length < 5 || shortRight.endsWith("…")) continue;
       const question = `"${trimAnswer(left, 70)}…" — what does the passage contrast this with?`;
       if (!questionOk(question)) continue;
       usedSentences.add(s);
