@@ -346,10 +346,11 @@ function extractKeyTerm(sentence, tfidfScores) {
     let term = afterVerb[1].trim();
     if (/^[a-z]/.test(term)) term = term.split(/\s+/)[0];
     if (term.length >= 3 && !STOP.has(term.toLowerCase()) && !GENERIC_BLANK_WORDS.has(term.toLowerCase())) {
-      // Use wink-nlp POS to reject adverbs — catches any adverb, not just the hardcoded list
+      // Reject adverbs, verbs, and auxiliaries — passive participles like "passed" or
+      // "classed" are tagged VERB and make terrible blanks; only noun/adj complements qualify.
       let firstPos = null;
       wink.readDoc(term).tokens().each(t => { if (!firstPos) firstPos = t.out(its.pos); });
-      if (firstPos !== 'ADV') return term;
+      if (firstPos !== 'ADV' && firstPos !== 'VERB' && firstPos !== 'AUX') return term;
     }
   }
   // Use wink-nlp PROPN tags to find proper noun phrases, preferring non-subject terms
@@ -400,9 +401,12 @@ const VAGUE_SUBJECT = /^\b(one|some|this|that|any|many|such|another|other|each|e
 // Trim a definition string to the first natural clause boundary (max 8 words)
 // so MCQ answer choices don't span multiple lines.
 function trimDefinition(def) {
-  // Cut at clause-separating comma/semicolon followed by a connective or capital
   const clauseEnd = def.search(/[,;]\s+(?:and|or|but|which|that|where|when|although|while|though|however|including|such as|especially|particularly|notably)/i);
-  if (clauseEnd >= 20) return def.slice(0, clauseEnd).trim();
+  if (clauseEnd >= 20) {
+    const trimmed = def.slice(0, clauseEnd).trim();
+    // Only accept the clause-trim if it still forms a meaningful phrase (≥5 words)
+    if (trimmed.split(" ").length >= 5) return trimmed;
+  }
   const words = def.split(" ");
   return words.length > 9 ? words.slice(0, 9).join(" ") : def;
 }
@@ -428,7 +432,7 @@ function extractDefinition(sentence) {
     // Reject subjects ending with a preposition/conjunction — they're clause fragments, not nouns.
     const BAD_SUBJECT_ENDINGS = new Set(["the","a","an","of","in","on","at","by","and","or","but","its","their","with","which","that","who"]);
     if (BAD_SUBJECT_ENDINGS.has(subject.split(" ").at(-1).toLowerCase())) return null;
-    if (subject.split(" ").length <= 4 && definition.split(" ").length >= 3 && !VAGUE_SUBJECT.test(subject)) return { subject, definition };
+    if (subject.split(" ").length <= 4 && definition.split(" ").length >= 4 && !VAGUE_SUBJECT.test(subject)) return { subject, definition };
   }
   // "X is the term/name/word for Y" — encyclopedic definition pattern
   const termForMatch = sentence.match(
@@ -827,24 +831,35 @@ function computeLeakageScore(question, answer) {
 }
 
 const _embeddingCache = new Map();
+let _embed429Until = 0;
+let _embedInFlight = 0;
+const _EMBED_MAX_CONCURRENT = 2;
 
 async function getEmbeddingsCached(words) {
   const uncached = words.filter(w => !_embeddingCache.has(w));
   if (uncached.length) {
     if (_embeddingCache.size > 500) _embeddingCache.delete(_embeddingCache.keys().next().value);
+    if (Date.now() < _embed429Until || _embedInFlight >= _EMBED_MAX_CONCURRENT) {
+      return words.map(w => _embeddingCache.get(w) || null);
+    }
+    _embedInFlight++;
     try {
       const res = await fetch('/api/embed', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sentences: uncached }),
         signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
       });
-      if (res.ok) {
+      if (res.status === 429) {
+        _embed429Until = Date.now() + 30_000;
+      } else if (res.ok) {
         const { embeddings } = await res.json();
         if (embeddings?.length === uncached.length) {
           uncached.forEach((w, i) => _embeddingCache.set(w, embeddings[i]));
         }
       }
-    } catch {}
+    } catch {} finally {
+      _embedInFlight--;
+    }
   }
   return words.map(w => _embeddingCache.get(w) || null);
 }
@@ -868,6 +883,7 @@ async function filterDistractorsBySimilarity(answer, candidates, maxSimilarity =
 // WordNet via Open English WordNet REST API — free, no key, returns coordinate terms
 // (same-level words like oak→elm→pine) which are ideal distractors.
 async function fetchWordNetDistractors(word, pos) {
+  if (!word || /\s/.test(word) || word.length > 40) return [];
   const posMap = { NOUN: 'n', VERB: 'v', ADJ: 'a', ADV: 'r' };
   const targetPos = posMap[pos || 'NOUN'] || 'n';
   try {
@@ -1381,17 +1397,22 @@ function inferPos(word, contextBefore) {
   return "noun"; // default guess
 }
 
-// ── Double-blank questions ────────────────────────────────────────────────────
-function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) {
-  const out = [];
+// Shared helper: count content words across sentences, excluding stop-words, proper nouns, adverbs.
+function buildContentWordFreq(sentences, allTerms) {
   const properLower = new Set(allTerms.flatMap(t => t.toLowerCase().split(/\s+/)));
-
   const wordFreq = {};
   sentences.forEach(s => {
     (s.toLowerCase().match(/\b[a-z]{4,}\b/g) || [])
       .filter(w => !STOP.has(w) && !properLower.has(w) && !GENERIC_BLANK_WORDS.has(w) && inferPos(w, "") !== "adv")
       .forEach(w => { wordFreq[w] = (wordFreq[w] || 0) + 1; });
   });
+  return wordFreq;
+}
+
+// ── Double-blank questions ────────────────────────────────────────────────────
+function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) {
+  const out = [];
+  const wordFreq = buildContentWordFreq(sentences, allTerms);
   const fullTerms = Object.keys(wordFreq)
     .map(w => ({ w, score: tfidfScores[stem(w)] || 0 }))
     .sort((a, b) => b.score - a.score)
@@ -1490,16 +1511,8 @@ async function fetchDatamuseDistractors(word, textPool, posHint = null) {
 // ── Vocabulary-in-context questions ──────────────────────────────────────────
 async function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSentences) {
   const out = [];
-  const properLower = new Set(allTerms.flatMap(t => t.toLowerCase().split(/\s+/)));
-
-  // Build pool of FULL words (not TF-IDF stems) from the text
-  const wordFreq = {};
-  sentences.forEach(s => {
-    (s.toLowerCase().match(/\b[a-z]{4,}\b/g) || [])
-      .filter(w => !STOP.has(w) && !properLower.has(w) && !GENERIC_BLANK_WORDS.has(w) && inferPos(w, "") !== "adv")
-      .forEach(w => { wordFreq[w] = (wordFreq[w] || 0) + 1; });
-  });
   // Score full words using their TF-IDF score (or their stem's score as fallback)
+  const wordFreq = buildContentWordFreq(sentences, allTerms);
   const fullVocabTerms = Object.keys(wordFreq)
     .map(w => ({ w, score: tfidfScores[stem(w)] || 0 }))
     .sort((a, b) => b.score - a.score)
@@ -1990,7 +2003,12 @@ function makeSuperlative(sentences, count, usedSentences) {
     let answer = null, question = null;
     if (subjMatch) {
       answer = subjMatch[1].trim();
-      question = `What was ${superlative.toLowerCase()}?`;
+      // Include 1-2 words after the superlative so question reads "What was the largest planet?"
+      // rather than the bare "What was the largest?"
+      const afterSup = s.slice(subjMatch[0].length);
+      const nounM = afterSup.match(/^(\w+(?:\s+\w+)?)/);
+      const phrase = nounM ? nounM[1].replace(/^the\s+/i, '') : superlative.replace(/^the\s+/i, '');
+      question = `What was the ${phrase}?`;
     } else if (objMatch) {
       answer = objMatch[1].trim().replace(/[.!?,]+$/, "");
       question = `What was the ${superlative.replace(/^the\s+/i, "").trim()}?`;
@@ -2388,6 +2406,9 @@ function makePronounRefQuestions(rawSentences, resolvedSentences, allTerms, coun
     if (usedSentences.has(raw)) continue;
     const pronounMatch = raw.match(PRON_RE);
     if (!pronounMatch) continue;
+    const pronoun = pronounMatch[0];
+    // Expletive "It" — "It is/was/has been..." at sentence start is not a real pronoun reference
+    if (pronoun === 'It' && /^It\s+(is|was|has been|had been|seems|appears|became|happened|turns? out)/i.test(raw)) continue;
     // Use word-diff to find what replaced the pronoun — more reliable than entity-set
     // subtraction when the referent name already appears elsewhere in the raw sentence.
     const antecedent = findPronounReplacement(raw, resolved);
@@ -2396,7 +2417,6 @@ function makePronounRefQuestions(rawSentences, resolvedSentences, allTerms, coun
     const typeFiltered = allTerms.filter(t => t !== antecedent && /^[A-Z]/.test(t) && t.length > 2 && detectEntityType(t) === antecedentType);
     const distractors = shuffle(typeFiltered.length >= 3 ? typeFiltered : allTerms.filter(t => t !== antecedent && /^[A-Z]/.test(t) && t.length > 2)).slice(0, 3);
     if (distractors.length < 2) continue;
-    const pronoun = pronounMatch[0];
     const display = raw.length > 100 ? raw.slice(0, 100) + "..." : raw;
     const choices = shuffle([antecedent, ...distractors]);
     usedSentences.add(raw);
@@ -2499,9 +2519,6 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   // words pull sentences together more strongly than common ones.
   let ranked = textRank(sentencesOrdered, 30, 0.85, tfidfScores);
 
-  // Pre-warm Datamuse cache before generators fire — turns N serial calls into one parallel batch
-  await prewarmDatamuseCache(ranked.slice(0, 30), tfidfScores, allTerms);
-
   // Neural re-ranking + spaCy dep parse run in parallel.
   // Larger batch (80) means the centroid is computed from more of the document,
   // reducing the bias that arose when only the top 40 sentences were embedded.
@@ -2517,6 +2534,9 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     neuralScored.sort((a, b) => b.score - a.score);
     ranked = [...neuralScored.map(x => x.s), ...ranked.slice(batchSize)];
   }
+
+  // Pre-warm Datamuse cache after neural re-ranking so the top-30 reflects the final order
+  await prewarmDatamuseCache(ranked.slice(0, 30), tfidfScores, allTerms);
 
   let qs;
   if (qType === "fill") {
