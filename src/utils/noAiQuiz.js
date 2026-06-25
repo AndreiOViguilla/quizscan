@@ -163,7 +163,7 @@ function resolveCoref(sentences, paraFirstSet = null) {
 function scoreSentence(s, idx, total, isParaFirst = false, rawS = s) {
   let score = 0;
   if (isParaFirst) score += 2;
-  if (idx < total * 0.2) score += 2;
+  else if (idx < total * 0.2) score += 2;
   if (/\b(is|are|was|were|defined as|refers to|known as|called)\b/i.test(s)) score += 3;
   if (/\b\d{4}\b/.test(s)) score += 2;
   if (/\d+(\.\d+)?(%|million|billion|km|kg)/i.test(s)) score += 2;
@@ -247,6 +247,15 @@ function extractSentences(text, { sorted = true, returnBoth = false } = {}) {
       if (/\b(IconBritannica|Ask\s*Anything|Quick\s*Summary|Related\s*Questions?|Britannica\s*AI)\b/i.test(s)) return false;
       // Reject image caption fragments (pattern: "N of N [proper noun] [action verb]...")
       if (/^\d+\s+of\s+\d+\s+[A-Z]/.test(s)) return false;
+      // Reject Wikipedia section-header concatenation artifacts.
+      // Two patterns: lowercase→uppercase mid-word ("BackgroundCauses") and
+      // Roman-numeral + capitalized word ("IIAftermath").
+      if (s.split(/\s+/).some(w => {
+        if (w.length <= 6) return false;
+        if (/[a-z][A-Z]/.test(w) && !/^(Mc|Mac)[A-Z]/.test(w)) return true; // "BackgroundCauses"
+        if (/[A-Z]{2}[a-z]/.test(w)) return true; // "IIAftermath"
+        return false;
+      })) return false;
       return true;
     });
   const resolved = resolveCoref(raw, paraFirstSet);
@@ -664,7 +673,7 @@ function makeDepParseQuestion(parseResult) {
       const agentPhrase = tokens
         .filter(t => t.head === agent.i && t.dep === 'compound')
         .concat(agent).sort((a, b) => a.i - b.i).map(t => t.text).join(' ');
-      const q = `Who ${root.lemma}d ${passSubj.text}?`;
+      const q = `Who ${root.text.toLowerCase()} ${passSubj.text}?`;
       if (!questionOk(q)) return null;
       return { question: q, answer: agentPhrase, type: 'person', sentence };
     }
@@ -1116,6 +1125,10 @@ function questionOk(q) {
   if (/^What did .+\b(was|were|had|has|is|are|been|founded|invented|created|wrote|built)\?$/.test(q)) return false;
   // Implausibly trivial: "Who is X?" / "What was Y?" with a 1-2 char answer baked in
   if (/^(Who|What) (is|was|are|were) \w{1,2}\?$/.test(q)) return false;
+  // Truncated / trailing punctuation before the question mark
+  if (/[,:;]\s*\?$/.test(q)) return false;
+  // Repeated consecutive words ("the the", "was was")
+  if (/\b(\w+)\s+\1\b/i.test(q)) return false;
   return true;
 }
 
@@ -1879,6 +1892,9 @@ function makeTimeline(sentences, count, usedSentences) {
     if (usedSentences.has(s)) continue;
     const m = s.match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
     if (!m) continue;
+    // Skip sentences that are figure captions or already-blanked fill sources
+    if (/___+/.test(s)) continue;
+    if (/^[A-Z][a-z]+\s+[A-Z][a-z]+\s+at\s+a\b/i.test(s)) continue; // "Adolf Hitler at a rally..."
     const yr = parseInt(m[1]);
     if (!byYear[yr]) byYear[yr] = s;
   }
@@ -1973,9 +1989,9 @@ function makeContrast(sentences, count, allTerms, usedSentences) {
       out.push({ type: "mcq", question, choices, answer: choices.indexOf(rightSubj), difficulty: "medium", explanation: `From source: "${s}"` });
     } else {
       // Common-noun or abstract contrast → fill question
-      // Reject if the right side is a long clause — trimAnswer would truncate mid-sentence
-      // producing a partial-clause answer that's ungradeable (e.g. "the state of war…").
+      // Reject long clauses and comma-clauses ("officially neutral, was generally aligned…")
       if (right.split(" ").length > 8) continue;
+      if (/,\s*(was|is|were|are|had|has|would|could|did)\b/i.test(right)) continue;
       const shortRight = trimAnswer(right, 60);
       if (shortRight.length < 5 || shortRight.endsWith("…")) continue;
       const question = `"${trimAnswer(left, 70)}…" — what does the passage contrast this with?`;
@@ -2328,12 +2344,26 @@ const CN_REL = {
 async function makeConceptNetQuestion(sentences, count, tfidfScores, allTerms, usedSentences) {
   const out = [];
 
-  // Pick top TF-IDF terms (noun-like: 4+ chars, no stop words, not all-caps acronym)
+  // Build stem → longest original word map from sentences so we query ConceptNet with
+  // real words ("photosynthesis") instead of Porter stems ("photosynthes").
+  const stemToWord = {};
+  for (const s of sentences) {
+    for (const w of (s.match(/\b[a-z]{4,}\b/gi) || [])) {
+      const lw = w.toLowerCase();
+      if (STOP.has(lw)) continue;
+      const st = stem(lw);
+      if (!stemToWord[st] || lw.length > stemToWord[st].length) stemToWord[st] = lw;
+    }
+  }
+
+  // Pick top TF-IDF stems, map each back to its original word form
   const topTerms = Object.entries(tfidfScores)
     .filter(([w]) => w.length >= 4 && !STOP.has(w) && !GENERIC_BLANK_WORDS.has(w) && !/^[A-Z]{2,}$/.test(w))
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([w]) => w);
+    .slice(0, 8)
+    .map(([w]) => stemToWord[w] || w)
+    .filter((w, i, arr) => arr.indexOf(w) === i) // deduplicate after un-stemming
+    .slice(0, 5);
 
   if (!topTerms.length) return out;
 
@@ -2453,7 +2483,7 @@ function findPronounReplacement(raw, resolved) {
       // advance si until tokens re-sync (max 4 tokens ahead for multi-word names)
       while (si < sw.length && si - start < 5 && sw[si] !== rw[ri]) si++;
       const replacement = sw.slice(start, si).join("").replace(/[''s,.]+$/, "").trim();
-      if (replacement && /^[A-Z]/.test(replacement)) return replacement;
+      if (replacement && /^[A-Z]/.test(replacement) && !STOP.has(replacement.toLowerCase()) && replacement.length > 2) return replacement;
     } else { ri++; si++; }
   }
   return null;
@@ -2481,11 +2511,13 @@ function makePronounRefQuestions(rawSentences, resolvedSentences, allTerms, coun
     const distractors = shuffle(typeFiltered.length >= 3 ? typeFiltered : allTerms.filter(t => t !== antecedent && /^[A-Z]/.test(t) && t.length > 2)).slice(0, 3);
     if (distractors.length < 2) continue;
     const display = raw.length > 100 ? raw.slice(0, 100) + "..." : raw;
+    // "who" for people; "what" for places, orgs, things, and "It" references
+    const questionWord = (pronoun !== 'It' && pronoun !== 'They' && antecedentType === 'person') ? 'who' : 'what';
     const choices = shuffle([antecedent, ...distractors]);
     usedSentences.add(raw);
     out.push({
       type: "mcq",
-      question: `In the passage, who does "${pronoun}" refer to in: "${display}"?`,
+      question: `In the passage, ${questionWord} does "${pronoun}" refer to in: "${display}"?`,
       choices,
       answer: choices.indexOf(antecedent),
       difficulty: "medium",
