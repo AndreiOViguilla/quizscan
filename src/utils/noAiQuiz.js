@@ -1115,11 +1115,14 @@ async function makeTF(sentences, count, allEntities, usedSentences) {
   const trueQs = trueCandidates.slice(0, trueTarget);
   const usedForTrue = new Set(trueQs.map(x => x.s));
 
-  // Pass 2: collect all viable negations, rank by strategy quality, then slice.
-  // First-come-first-served on a shuffled list means a "is not" fallback negation can
-  // beat a later Datamuse antonym negation purely by shuffle luck.
+  // Pass 2: collect negations, rank by strategy quality, then slice.
+  // Cap attempts so we don't hammer Datamuse for every sentence in a long document.
+  // falseTarget*4 attempts gives enough pool to rank from without excessive API calls.
   const negCandidates = [];
+  let attempts = 0;
   for (const s of shuffled) {
+    if (negCandidates.length >= falseTarget * 3) break; // enough to rank — stop early
+    if (attempts++ >= falseTarget * 4) break;           // hard cap on API calls
     if (usedSentences.has(s) || usedForTrue.has(s)) continue;
     const dataN = await negateWithDatamuse(s);
     const entN = !dataN ? negateSentence(s, allEntities) : null;
