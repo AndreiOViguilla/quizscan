@@ -44,6 +44,11 @@ const DISTRACTOR_BLOCKLIST = new Set([
 const _datamuseCache = new Map();
 const _datamuse429 = new Set(); // URLs that recently 429'd — skip until auto-cleared
 
+// ── Inverted index for distractor proximity ranking ───────────────────────────
+// Rebuilt on each generateNoAiQuiz call. Maps word → Set<lowercase sentence>.
+// Lets rankDistractorsByProximity skip O(candidates × sentences × srcWords) scans.
+let _invertedIndex = null;
+
 async function fetchDatamuseCached(url, timeoutMs = 2500, retries = 1) {
   if (_datamuseCache.has(url)) return _datamuseCache.get(url);
   if (_datamuse429.has(url)) return [];
@@ -90,12 +95,16 @@ function cleanText(raw) {
 }
 
 // ── Coreference Resolution ────────────────────────────────────────────────────
-function resolveCoref(sentences) {
+function resolveCoref(sentences, paraFirstSet = null) {
   let lastPerson = null;
   let lastPlural = null;
   let lastThing = null;
 
-  return sentences.map(s => {
+  return sentences.map((s, idx) => {
+    // Reset antecedents at paragraph boundaries so pronouns can't reach across topics.
+    if (paraFirstSet?.has(s) && idx > 0) {
+      lastPerson = null; lastPlural = null; lastThing = null;
+    }
     let resolved = s;
 
     if (lastPerson) {
@@ -240,7 +249,7 @@ function extractSentences(text, { sorted = true, returnBoth = false } = {}) {
       if (/^\d+\s+of\s+\d+\s+[A-Z]/.test(s)) return false;
       return true;
     });
-  const resolved = resolveCoref(raw);
+  const resolved = resolveCoref(raw, paraFirstSet);
   const scored = resolved.map((s, i) => ({ s, score: scoreSentence(s, i, resolved.length, paraFirstSet.has(raw[i]), raw[i]) }));
   if (returnBoth) {
     const ordered = scored.map(x => x.s);
@@ -270,7 +279,8 @@ function extractSentences(text, { sorted = true, returnBoth = false } = {}) {
 // all accumulate under the same key. This matches the fallback lookups in
 // makeVocabContext and makeDoubleFill that already strip common suffixes.
 function stem(w) {
-  return w.replace(/(?:ers?|ing|ed|ly|ness|tion|sion|ment|ity)$/, "");
+  const s = w.replace(/(?:ers?|ing|ed|ly|ness|tion|sion|ment|ity)$/, "");
+  return s.length >= 3 ? s : w;
 }
 function tfidf(sentences) {
   const docCount = sentences.length;
@@ -370,6 +380,17 @@ function extractKeyTerm(sentence, tfidfScores) {
   }
   const num = sentence.match(/\b\d[\d,]*(?:\.\d+)?(?:\s*(?:million|billion|thousand|percent|%|km|kg|m\b))?\b/i);
   if (num) return num[0];
+
+  // TF-IDF fallback: pick the highest-scoring content word from this sentence.
+  // Catches key nouns in scientific/technical texts (e.g. "photosynthesis", "mitochondria")
+  // that have no proper noun and no number but are still the sentence's focal term.
+  const tfidfFallback = (sentence.toLowerCase().match(/\b[a-z]{5,}\b/g) || [])
+    .filter(w => !STOP.has(w) && !GENERIC_BLANK_WORDS.has(w) && inferPos(w, '') !== 'adv')
+    .map(w => ({ w, score: tfidfScores[stem(w)] || tfidfScores[w] || 0 }))
+    .filter(x => x.score > 0.2)
+    .sort((a, b) => b.score - a.score)[0];
+  if (tfidfFallback) return tfidfFallback.w;
+
   return null;
 }
 
@@ -724,8 +745,31 @@ function getDistractorsByPos(answer, posPool, count = 3) {
 
 // Score each candidate by how many sentences contain it AND a word from the source sentence.
 // Higher score = more topically proximate = harder for students to eliminate by topic.
+// Uses _invertedIndex when available: first collects the union of sentences that share
+// any source word (fast Set lookup), then checks each candidate against that small set
+// instead of scanning all sentences.
 function rankDistractorsByProximity(candidates, sourceSentence, sentences) {
   const srcWords = sourceSentence.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !STOP.has(w));
+
+  if (_invertedIndex) {
+    // Union of all sentences that contain at least one source word
+    const srcSentUnion = new Set();
+    for (const w of srcWords) {
+      const ws = _invertedIndex[w];
+      if (ws) for (const sl of ws) srcSentUnion.add(sl);
+    }
+    return candidates
+      .map(c => {
+        const cLow = c.toLowerCase();
+        let coScore = 0;
+        for (const sl of srcSentUnion) if (sl.includes(cLow)) coScore++;
+        return { c, coScore };
+      })
+      .sort((a, b) => b.coScore - a.coScore)
+      .map(x => x.c);
+  }
+
+  // Fallback when index hasn't been built yet
   const sentLows = sentences.map(s => s.toLowerCase());
   return candidates
     .map(c => {
@@ -1522,7 +1566,12 @@ function makeOrdering(orderedSentences, count, usedSentences) {
     for (let i = 0; i <= orderedSentences.length - windowSize && out.length < count; i++) {
       const group = orderedSentences.slice(i, i + windowSize);
       if (group.some(s => usedSentences.has(s))) continue;
-      if (!group.some(s => SEQ.test(s))) continue;
+      // Accept a group if it has an explicit sequence word OR if every sentence
+      // carries a year and the years are strictly non-decreasing (chronological
+      // passages that use years rather than "then/after" as the sequencing signal).
+      const groupYears = group.map(s => { const m = s.match(/\b(1[0-9]{3}|20[0-2][0-9])\b/); return m ? parseInt(m[1]) : null; });
+      const hasMonotonicYears = groupYears.every(y => y !== null) && groupYears.every((y, k) => k === 0 || y >= groupYears[k - 1]);
+      if (!group.some(s => SEQ.test(s)) && !hasMonotonicYears) continue;
       const minOk = windowSize === 4 ? 3 : 2;
       if (group.filter(s => questionOk(s)).length < minOk) continue;
       const correct = [...group];
@@ -1842,7 +1891,9 @@ function makeContrast(sentences, count, allTerms, usedSentences) {
 }
 
 // ── TextRank sentence ranking ─────────────────────────────────────────────────
-function textRank(sentences, iterations = 30, damping = 0.85) {
+// tfidfScores: passed from generateNoAiQuiz so rare shared words pull sentences
+// together more strongly than common words like "battle" or "army".
+function textRank(sentences, iterations = 30, damping = 0.85, tfidfScores = {}) {
   const n = sentences.length;
   if (n < 3) return sentences;
   const cap = Math.min(n, 60);
@@ -1856,12 +1907,13 @@ function textRank(sentences, iterations = 30, damping = 0.85) {
   function sim(i, j) {
     const a = wordSets[i], b = wordSets[j];
     if (!a.size || !b.size) return 0;
-    let inter = 0;
-    for (const w of a) if (b.has(w)) inter++;
-    // Use sentence word count (not unique-word set size) in the denominator.
-    // Standard TextRank: log(len_a)+log(len_b) penalizes short sentences that
-    // otherwise get artificially inflated overlap ratios.
-    return inter / (Math.log2(sentLens[i] + 1) + Math.log2(sentLens[j] + 1) + 1e-6);
+    // TF-IDF weighted overlap: rare shared words contribute more than common ones.
+    // Fall back to 0.1 so sentences with no scored vocabulary still connect weakly.
+    let weighted = 0;
+    for (const w of a) {
+      if (b.has(w)) weighted += (tfidfScores[stem(w)] || tfidfScores[w] || 0.1);
+    }
+    return weighted / (Math.log2(sentLens[i] + 1) + Math.log2(sentLens[j] + 1) + 1e-6);
   }
 
   // Precompute similarity matrix
@@ -2374,20 +2426,38 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   if (sentences.length < 5) throw new Error("Not enough content to generate questions. Try adding more text.");
 
   const tfidfScores = tfidf(sentences);
+
+  // Build inverted index over all sentences for fast distractor proximity ranking
+  _invertedIndex = {};
+  for (const s of sentences) {
+    const sLow = s.toLowerCase();
+    for (const w of sLow.split(/\s+/)) {
+      if (w.length > 3 && !STOP.has(w)) {
+        if (!_invertedIndex[w]) _invertedIndex[w] = new Set();
+        _invertedIndex[w].add(sLow);
+      }
+    }
+  }
+
   const allTerms = [...new Set(sentences.flatMap(s => extractProperNouns(s)))];
   // Years from the text are better distractors for year-type questions than computed ±deltas
   const allYears = [...new Set(sentences.flatMap(s => [...s.matchAll(/\b(1[3-9]\d{2}|20[0-2]\d)\b/g)].map(m => m[1])))];
   const allTermsWithYears = [...allTerms, ...allYears];
   const usedSentences = new Set();
 
-  // TextRank: graph-based sentence ranking as fallback (more reliable than raw TF-IDF order)
-  let ranked = textRank(sentences);
+  // TextRank: run on document-order sentences so the cap-60 window isn't biased by
+  // the initial scoreSentence sort, then weight similarity by TF-IDF so rare shared
+  // words pull sentences together more strongly than common ones.
+  let ranked = textRank(sentencesOrdered, 30, 0.85, tfidfScores);
 
   // Pre-warm Datamuse cache before generators fire — turns N serial calls into one parallel batch
   await prewarmDatamuseCache(ranked.slice(0, 30), tfidfScores, allTerms);
 
-  // Neural re-ranking + spaCy dep parse run in parallel
-  const batch = ranked.slice(0, 40);
+  // Neural re-ranking + spaCy dep parse run in parallel.
+  // Larger batch (80) means the centroid is computed from more of the document,
+  // reducing the bias that arose when only the top 40 sentences were embedded.
+  const batchSize = Math.min(ranked.length, 80);
+  const batch = ranked.slice(0, batchSize);
   const [embeddings, parseResults] = await Promise.all([
     fetchEmbeddings(batch),
     parseWithSpacy(ranked.slice(0, 20)),
@@ -2396,7 +2466,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     const centroid = computeCentroid(embeddings);
     const neuralScored = batch.map((s, i) => ({ s, score: cosineSimilarity(embeddings[i], centroid) }));
     neuralScored.sort((a, b) => b.score - a.score);
-    ranked = [...neuralScored.map(x => x.s), ...ranked.slice(40)];
+    ranked = [...neuralScored.map(x => x.s), ...ranked.slice(batchSize)];
   }
 
   let qs;
