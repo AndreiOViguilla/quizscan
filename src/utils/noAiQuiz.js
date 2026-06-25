@@ -583,6 +583,73 @@ async function parseWithSpacy(sentences) {
   } catch { return []; }
 }
 
+// valhalla/t5-base-qg-hl question generation — fires speculatively in mixed mode,
+// awaited only if the rule-based pool is thin. Answer is extracted here so the model
+// only needs to write a natural question around the highlighted span.
+let _flan429Until = 0;
+async function fetchFlanQuestions(sentences, tfidfScores) {
+  if (!sentences.length || Date.now() < _flan429Until) return [];
+  // Build {sentence, answer} pairs — model needs both to generate a targeted question
+  const items = sentences.slice(0, 8).map(s => {
+    const answer = extractKeyTerm(s, tfidfScores);
+    return answer ? { sentence: s, answer } : null;
+  }).filter(Boolean);
+  if (!items.length) return [];
+  try {
+    const res = await fetch('/api/flan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+    });
+    if (res.status === 429) { _flan429Until = Date.now() + 60_000; return []; }
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.questions) ? data.questions : [];
+  } catch { return []; }
+}
+
+// YAKE statistical keyphrase extraction — returns [{word, score}] where score ∈ [0,1], higher = more relevant.
+// Fires concurrently with neural re-ranking so it adds no latency to the pipeline.
+async function fetchBackendKeywords(text) {
+  const backendUrl = process.env.REACT_APP_BACKEND_URL;
+  if (!backendUrl) return [];
+  try {
+    const res = await fetch(`${backendUrl}/keywords`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text.slice(0, 10000), top_n: 25 }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined,
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.keywords) ? data.keywords : [];
+  } catch { return []; }
+}
+
+// NLTK WordNet via backend — coordinate terms (siblings in the WordNet hierarchy).
+// Preferred over direct en-word.net calls: no CSP issues, more reliable on Render.
+const _wordNetBackendCache = new Map();
+async function fetchWordNetBackend(word, pos = 'NOUN') {
+  const backendUrl = process.env.REACT_APP_BACKEND_URL;
+  if (!backendUrl || !word || /\s/.test(word) || word.length > 40) return [];
+  const cacheKey = `${word}:${pos}`;
+  if (_wordNetBackendCache.has(cacheKey)) return _wordNetBackendCache.get(cacheKey);
+  try {
+    const res = await fetch(`${backendUrl}/wordnet`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ word, pos }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined,
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const words = Array.isArray(data.words) ? data.words : [];
+    _wordNetBackendCache.set(cacheKey, words);
+    return words;
+  } catch { return []; }
+}
+
 function makeDepParseQuestion(parseResult) {
   const { sentence, tokens } = parseResult;
   const root = tokens.find(t => t.dep === 'ROOT' && t.pos === 'VERB');
@@ -884,6 +951,16 @@ async function filterDistractorsBySimilarity(answer, candidates, maxSimilarity =
 // (same-level words like oak→elm→pine) which are ideal distractors.
 async function fetchWordNetDistractors(word, pos) {
   if (!word || /\s/.test(word) || word.length > 40) return [];
+
+  // Prefer backend NLTK WordNet — more reliable, no additional CSP concerns
+  const backendWords = await fetchWordNetBackend(word, pos || 'NOUN');
+  if (backendWords.length) {
+    return backendWords
+      .map(w => w.toLowerCase())
+      .filter(w => w !== word.toLowerCase() && !w.includes(' ') && w.length >= 3 && !DISTRACTOR_BLOCKLIST.has(w));
+  }
+
+  // Fallback: direct en-word.net (already in CSP connect-src)
   const posMap = { NOUN: 'n', VERB: 'v', ADJ: 'a', ADV: 'r' };
   const targetPos = posMap[pos || 'NOUN'] || 'n';
   try {
@@ -892,7 +969,6 @@ async function fetchWordNetDistractors(word, pos) {
     if (!res.ok) return [];
     const data = await res.json();
     const synsets = (data.results || []).filter(s => s.pos === targetPos).slice(0, 3);
-    // Collect all relation IDs first, then fetch in parallel
     const relIds = [];
     for (const synset of synsets) {
       for (const rel of (synset.relations || [])) {
@@ -2496,6 +2572,9 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
 
   const tfidfScores = tfidf(sentences);
 
+  // Fire YAKE concurrently — it runs during neural re-ranking and adds zero latency
+  const yakeFetch = fetchBackendKeywords(text);
+
   // Build inverted index over all sentences for fast distractor proximity ranking
   _invertedIndex = {};
   for (const s of sentences) {
@@ -2535,6 +2614,20 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
     ranked = [...neuralScored.map(x => x.s), ...ranked.slice(batchSize)];
   }
 
+  // Merge YAKE keyphrases into tfidfScores: boosts terms YAKE found semantically central.
+  // Each word in a YAKE keyphrase gets +30% of the YAKE score, capped at 1.0.
+  // This runs after neural re-ranking since yakeFetch was in-flight during that await.
+  const yakeKeywords = await yakeFetch;
+  for (const { word, score } of yakeKeywords) {
+    for (const w of word.toLowerCase().split(/\s+/)) {
+      if (w.length <= 3 || STOP.has(w)) continue;
+      const boost = score * 0.3;
+      tfidfScores[w] = Math.min(1, (tfidfScores[w] || 0) + boost);
+      const s = stem(w);
+      if (s !== w) tfidfScores[s] = Math.min(1, (tfidfScores[s] || 0) + boost);
+    }
+  }
+
   // Pre-warm Datamuse cache after neural re-ranking so the top-30 reflects the final order
   await prewarmDatamuseCache(ranked.slice(0, 30), tfidfScores, allTerms);
 
@@ -2558,6 +2651,9 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   else {
     // Mixed: generate from all types, shuffle, take numQ
     const q = Math.ceil(numQ / 3);
+    // Fire FLAN speculatively — runs during the parallel generators below (no added latency).
+    // Only awaited later if the rule-based pool turns out to be thin.
+    const flanFetch = fetchFlanQuestions(ranked.filter(s => !usedSentences.has(s)).slice(0, 8), tfidfScores);
     // Each parallel function gets its own usedSentences to prevent mid-await races
     const used1 = new Set(), used2 = new Set(), used3 = new Set(), used4 = new Set(), used5 = new Set();
     const [tfQs, vocabQs, mcqQs, errorQs, cnQs] = await Promise.all([
@@ -2595,6 +2691,26 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
       ...makeNotTrue(ranked, Math.ceil(q / 3), allTerms, usedSentences),
       ...makePronounRefQuestions(rawSentences, sentencesOrdered, allTerms, Math.ceil(q / 3), usedSentences),
     ]);
+    // Top up with FLAN-T5 if the rule-based pool is thin
+    if (pool.length < numQ) {
+      const flanRaw = await flanFetch;
+      for (const { question, answer, sentence } of flanRaw) {
+        if (!question || !answer || answer.split(' ').length > 6) continue;
+        if (!questionOk(question)) continue;
+        if (usedSentences.has(sentence)) continue;
+        const sTerms = extractProperNouns(sentence);
+        let distractors = getDistractors(answer, allTerms, detectEntityType(answer), sTerms, posPool, tfidfScores, ranked, sentence);
+        distractors = normalizeLengthDistribution(answer, distractors);
+        usedSentences.add(sentence);
+        if (distractors.length >= 3) {
+          const choices = shuffle([answer, ...distractors.slice(0, 3)]);
+          pool.push({ type: 'mcq', question, choices, answer: choices.indexOf(answer), difficulty: 'medium', explanation: `From source: "${sentence}"` });
+        } else {
+          pool.push({ type: 'fill', question, answer, difficulty: 'medium', explanation: `From source: "${sentence}"` });
+        }
+      }
+    }
+
     // Soft cap: KWIC-blank questions ("Choose the correct answer: / Fill in the blank:")
     // are the lowest-quality format — limit them to at most 35% of the target count.
     const kwicCap = Math.ceil(numQ * 0.35);

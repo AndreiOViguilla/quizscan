@@ -13,6 +13,26 @@ def get_nlp():
         _nlp_en = spacy.load("en_core_web_sm")
     return _nlp_en
 
+_yake_extractor = None
+def get_yake():
+    global _yake_extractor
+    if _yake_extractor is None:
+        import yake
+        _yake_extractor = yake.KeywordExtractor(
+            lan="en", n=2, dedupLim=0.9, dedupFunc="seqm", windowsSize=1, top=30
+        )
+    return _yake_extractor
+
+def ensure_nltk():
+    import nltk
+    for corpus in ("wordnet", "omw-1.4"):
+        try:
+            nltk.data.find(f"corpora/{corpus}")
+        except LookupError:
+            nltk.download(corpus, quiet=True)
+
+ensure_nltk()
+
 app = FastAPI()
 
 app.add_middleware(
@@ -41,6 +61,14 @@ class InjectionRequest(BaseModel):
 
 class ParseRequest(BaseModel):
     sentences: list[str]
+
+class KeywordsRequest(BaseModel):
+    text: str
+    top_n: int = 25
+
+class WordNetRequest(BaseModel):
+    word: str
+    pos: str = "NOUN"
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -88,6 +116,61 @@ async def parse_sentences(req: ParseRequest):
         ]
         results.append({"sentence": sentence, "tokens": tokens})
     return {"results": results}
+
+
+@app.post("/keywords")
+def extract_keywords(req: KeywordsRequest):
+    extractor = get_yake()
+    text = req.text[:10000]
+    keywords = extractor.extract_keywords(text)[: req.top_n]
+    if not keywords:
+        return {"keywords": []}
+    # YAKE: lower score = more relevant. Invert to [0,1] where 1.0 = most relevant.
+    scores = [s for _, s in keywords]
+    min_s, max_s = min(scores), max(scores)
+    range_s = max_s - min_s if max_s > min_s else 1.0
+    normalized = [
+        {"word": kw, "score": round(1.0 - (s - min_s) / range_s, 4)}
+        for kw, s in keywords
+    ]
+    return {"keywords": normalized}
+
+
+@app.post("/wordnet")
+def wordnet_lookup(req: WordNetRequest):
+    import re
+    from nltk.corpus import wordnet as wn
+    word = req.word.strip()
+    if not word or re.search(r"\s", word) or len(word) > 40:
+        return {"words": []}
+    pos_map = {"NOUN": wn.NOUN, "VERB": wn.VERB, "ADJ": wn.ADJ, "ADV": wn.ADV}
+    pos = pos_map.get(req.pos.upper(), wn.NOUN)
+    synsets = wn.synsets(word, pos=pos)[:3]
+    if not synsets:
+        return {"words": []}
+    result = set()
+    for synset in synsets:
+        # Coordinate terms: siblings via shared hypernym
+        for hypernym in synset.hypernyms()[:2]:
+            for hyponym in hypernym.hyponyms()[:6]:
+                for lemma in hyponym.lemmas():
+                    w = lemma.name().replace("_", " ")
+                    if w.lower() != word.lower() and " " not in w:
+                        result.add(w)
+        # Direct hyponyms
+        for hyponym in synset.hyponyms()[:3]:
+            for lemma in hyponym.lemmas():
+                w = lemma.name().replace("_", " ")
+                if w.lower() != word.lower() and " " not in w:
+                    result.add(w)
+        # Similar-to (adjectives)
+        for similar in synset.similar_tos()[:3]:
+            for lemma in similar.lemmas():
+                w = lemma.name().replace("_", " ")
+                if w.lower() != word.lower() and " " not in w:
+                    result.add(w)
+    words = [w for w in result if len(w) >= 3]
+    return {"words": words[:20]}
 
 
 @app.post("/check-injection")
