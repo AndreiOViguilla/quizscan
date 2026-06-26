@@ -168,7 +168,10 @@ function resolveCoref(sentences, paraFirstSet = null) {
       });
     }
     if (lastThing) {
-      resolved = resolved.replace(/\bIt\b/g, lastThing);
+      // Skip expletive "It" constructions — replacing them garbles the sentence.
+      // "It is important that…" / "It was believed…" / "It has been shown…"
+      const isExpletive = /^It\s+(is|was|has been|had been|seems?|appears?|became|happened|turns?\s+out|takes?|means?|looks?|sounds?)\b/i.test(resolved);
+      if (!isExpletive) resolved = resolved.replace(/\bIt\b/g, lastThing);
     }
 
     // Update antecedent tracking from original sentence.
@@ -503,12 +506,16 @@ function extractDefinition(sentence) {
 }
 
 // ── Cause & Effect Detection ──────────────────────────────────────────────────
+// Subordinating conjunctions that signal a dependent clause, not a standalone answer
+const SUBORD_FRAG = /^(although|though|even though|while|whereas|since|because|if|when|after|before|as|until|unless|despite|given that|provided that|in order that)\b/i;
+
 function extractCauseEffect(sentence) {
   // "A because B" → "What was the reason that A?"
   const becauseM = sentence.match(/^(.{15,150}?)\s+because\s+(.{10,})$/i);
   if (becauseM) {
     const effect = becauseM[1].replace(/[.!?]+$/, "");
     let cause = becauseM[2].replace(/[.!?]+$/, "");
+    if (SUBORD_FRAG.test(cause)) return null; // cause is itself a subordinate clause
     // If the cause clause is a compound (joined by and/but/or), strip the tail
     // so the answer is a single clean clause rather than a run-on phrase.
     if (cause.split(/\s+/).length > 8) {
@@ -522,6 +529,7 @@ function extractCauseEffect(sentence) {
   if (resultM) {
     const cause = resultM[1].replace(/[.!?]+$/, "");
     const effect = resultM[2].replace(/[.!?]+$/, "");
+    if (SUBORD_FRAG.test(effect)) return null;
     return { question: `What resulted from ${cause.charAt(0).toLowerCase() + cause.slice(1)}?`, answer: effect };
   }
   // "A led to/caused/resulted in B"
@@ -529,28 +537,43 @@ function extractCauseEffect(sentence) {
   if (causedM) {
     const cause = causedM[1].replace(/[.!?]+$/, "");
     const effect = causedM[2].replace(/[.!?]+$/, "");
+    if (SUBORD_FRAG.test(effect)) return null;
     return { question: `What did ${cause.charAt(0).toLowerCase() + cause.slice(1)} lead to?`, answer: effect };
   }
   return null;
 }
 
 // ── Sequence Detection ────────────────────────────────────────────────────────
+// Prepositional/adverbial fragments that make meaningless question stems
+const FRAG_STEP = /^(in fact|for example|for instance|as a result|in contrast|in addition|on the other hand|at the same time|in other words|in turn|in particular|above all|indeed|therefore|thus|hence|however|meanwhile|consequently|moreover|furthermore|additionally|nevertheless|nonetheless)\b/i;
+
 function extractSequence(sentence) {
   // "After X, Y happened" — cap X at 60 chars to avoid giant questions
   const afterM = sentence.match(/^After\s+(.{5,60}?),\s+(.{10,})$/i);
   if (afterM) {
-    return { question: `What happened after ${afterM[1].toLowerCase()}?`, answer: afterM[2].replace(/[.!?]+$/, "") };
+    const clause = afterM[1].toLowerCase();
+    if (SUBORD_FRAG.test(clause) || FRAG_STEP.test(clause)) return null;
+    const answer = afterM[2].replace(/[.!?]+$/, "");
+    if (SUBORD_FRAG.test(answer)) return null;
+    return { question: `What happened after ${clause}?`, answer };
   }
   // "X, then Y" — cap X at 60 chars
   const thenM = sentence.match(/^(.{10,60}?),?\s+then\s+(.{10,})$/i);
   if (thenM) {
     const step = thenM[1].replace(/[.!?]+$/, "");
-    return { question: `What followed "${step}"?`, answer: thenM[2].replace(/[.!?]+$/, "") };
+    if (SUBORD_FRAG.test(step) || FRAG_STEP.test(step)) return null;
+    const answer = thenM[2].replace(/[.!?]+$/, "");
+    if (SUBORD_FRAG.test(answer)) return null;
+    return { question: `What followed "${step}"?`, answer };
   }
   // "Before X, Y"
   const beforeM = sentence.match(/^Before\s+(.{5,60}?),\s+(.{10,})$/i);
   if (beforeM) {
-    return { question: `What occurred before ${beforeM[1].toLowerCase()}?`, answer: beforeM[2].replace(/[.!?]+$/, "") };
+    const clause = beforeM[1].toLowerCase();
+    if (SUBORD_FRAG.test(clause) || FRAG_STEP.test(clause)) return null;
+    const answer = beforeM[2].replace(/[.!?]+$/, "");
+    if (SUBORD_FRAG.test(answer)) return null;
+    return { question: `What occurred before ${clause}?`, answer };
   }
   return null;
 }
@@ -999,7 +1022,7 @@ async function filterDistractorsBySimilarity(answer, candidates, maxSimilarity =
     const emb = embeddings[i + 1];
     if (!emb) return true;
     const sim = cosineSimilarity(answerEmb, emb);
-    return sim < maxSimilarity && sim > 0.15;
+    return sim < maxSimilarity;
   });
 }
 
@@ -1124,12 +1147,17 @@ function negateSentence(sentence, allEntities) {
   const yearMatch = sentence.match(/\b(\d{4})\b/);
   if (yearMatch) {
     const y = parseInt(yearMatch[1]);
-    return sentence.replace(yearMatch[0], String(Math.random() > 0.5 ? y + 5 : y - 5));
+    // Use a plausible-but-wrong offset (10–30 years) so the false statement isn't
+    // trivially obvious from a ±5 shift that students learn to spot mechanically.
+    const offsets = [10, 15, 20, 25, 30];
+    const off = offsets[Math.floor(Math.random() * offsets.length)];
+    return sentence.replace(yearMatch[0], String(Math.random() > 0.5 ? y + off : y - off));
   }
   const numMatch = sentence.match(/\b(\d+)\b/);
   if (numMatch) {
     const n = parseInt(numMatch[1]);
-    const delta = Math.max(1, Math.ceil(n * 0.4));
+    // Use 50–80% shift to avoid trivially spotting "slightly wrong" numbers.
+    const delta = Math.max(1, Math.ceil(n * (0.5 + Math.random() * 0.3)));
     return sentence.replace(numMatch[0], String(Math.random() > 0.5 ? n + delta : Math.max(1, n - delta)));
   }
   const verbMatch = sentence.match(/\b(is|are|was|were)\b/i);
@@ -1767,9 +1795,20 @@ function makeOrdering(orderedSentences, count, usedSentences) {
       while ((isIdentical(scrambled) || isReverse(scrambled) || tooSimilar(scrambled)) && tries++ < 20) {
         scrambled = shuffle([...group]);
       }
+      // Strip leading sequence cues so students can't order by "First/Then/Finally" alone.
+      const maskCues = s => {
+        let t = s.replace(/^(Firstly?|Secondly?|Thirdly?|Finally|Lastly|At first|Initially|To begin with|At this point|At that point),?\s+/i, '');
+        t = t.replace(/\b(then|next|after that|afterward(?:s)?|subsequently|meanwhile|thereafter)\b,?\s*/gi, ' ');
+        t = t.replace(/\s{2,}/g, ' ').trim();
+        return t.charAt(0).toUpperCase() + t.slice(1);
+      };
+      const maskedCorrect = correct.map(maskCues);
+      // Skip if masking made two choices identical
+      if (new Set(maskedCorrect).size !== maskedCorrect.length) continue;
+      const maskedScrambled = scrambled.map(maskCues);
       group.forEach(s => usedSentences.add(s));
       const expParts = correct.map((s, j) => `${j + 1}. "${s.slice(0, 50)}..."`).join(" ");
-      out.push({ type: "ordering", question: "Arrange these sentences in the correct order:", items: scrambled, answers: correct, difficulty: "hard", explanation: `Correct order: ${expParts}` });
+      out.push({ type: "ordering", question: "Arrange these sentences in the correct order:", items: maskedScrambled, answers: maskedCorrect, difficulty: "hard", explanation: `Correct order: ${expParts}` });
     }
   }
   return out;
@@ -2670,7 +2709,12 @@ function applyDynamicDifficulty(questions, tfidfScores) {
         ? null // T/F: true=easy, false=medium — keep existing label
         : (typeof q.answer === 'number' ? q.choices?.[q.answer] : q.answer) || '';
     if (!answerStr) return q;
-    const score = tfidfScores[stem(answerStr.toLowerCase())] || tfidfScores[answerStr.toLowerCase()] || 0;
+    // For multi-word phrases ("Treaty of Versailles"), stem/lookup the whole phrase
+    // won't match — score the individual content words and take the max.
+    const words = answerStr.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !STOP.has(w));
+    const score = words.length
+      ? Math.max(...words.map(w => tfidfScores[stem(w)] || tfidfScores[w] || 0))
+      : 0;
     const difficulty = score > 0.65 ? 'easy' : score > 0.25 ? 'medium' : 'hard';
     return { ...q, difficulty };
   });
