@@ -254,6 +254,7 @@ function extractSentences(text, { sorted = true, returnBoth = false } = {}) {
         if (w.length <= 6) return false;
         if (/[a-z][A-Z]/.test(w) && !/^(Mc|Mac)[A-Z]/.test(w)) return true; // "BackgroundCauses"
         if (/[A-Z]{2}[a-z]/.test(w)) return true; // "IIAftermath"
+        if (/\d[A-Z]/.test(w)) return true; // "1939Germany"
         return false;
       })) return false;
       return true;
@@ -1700,7 +1701,7 @@ function makeOrdering(orderedSentences, count, usedSentences) {
 }
 
 // ── Error Identification questions ────────────────────────────────────────────
-async function makeErrorId(sentences, count, usedSentences) {
+async function makeErrorId(sentences, count, usedSentences, allTerms = []) {
   const out = [];
   // Batch all adj/adv words across sentences, fetch antonyms in parallel
   const allWordsNeeded = new Set();
@@ -1739,7 +1740,21 @@ async function makeErrorId(sentences, count, usedSentences) {
       errorWord = replacement; errorOriginal = raw;
       break;
     }
-    if (!swapped || !errorWord) continue;
+    if (!swapped || !errorWord) {
+      // Fallback: swap a single-word proper noun with a wrong entity from allTerms.
+      // Keeps the same decoy-extraction logic — all spans come from the sentence text.
+      const singleEntities = extractProperNouns(s).filter(e => !e.includes(' ') && e.length > 3);
+      for (const entity of shuffle(singleEntities)) {
+        const wrong = shuffle(
+          allTerms.filter(a => !a.includes(' ') && a.length > 3 && a !== entity && !s.includes(a))
+        )[0];
+        if (!wrong) continue;
+        const safe = entity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const replaced = s.replace(new RegExp(`\\b${safe}\\b`), wrong);
+        if (replaced !== s) { swapped = replaced; errorWord = wrong; errorOriginal = entity; break; }
+      }
+      if (!swapped || !errorWord) continue;
+    }
     const origStem = stem(errorOriginal.toLowerCase());
     const decoys = [];
     const decoyRe = /\b([A-Za-z]{4,})\b/g;
@@ -1838,7 +1853,7 @@ function makeQuantityQuestion(sentences, count, usedSentences) {
       const choices = shuffle([
         pctM[0],
         `${Math.round(Math.max(0, n - delta))}${fmtUnit}`,
-        `${Math.round(n + delta)}${fmtUnit}`,
+        `${Math.min(100, Math.round(n + delta))}${fmtUnit}`,
         `${Math.round(n * 2 > 100 ? n / 2 : n * 2)}${fmtUnit}`,
       ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 4));
       if (choices.length < 3) continue;
@@ -1909,6 +1924,8 @@ function makeTimeline(sentences, count, usedSentences) {
     // Strip leading "In YEAR, " so the year doesn't appear as a giveaway at the start
     t = t.replace(/^In\s+(1[0-9]{3}|20[0-2][0-9]),\s+/i, "");
     // Mask years and relative temporal phrases — both leak ordering information.
+    // Handle digit-glued-to-word artifacts ("1939Germany") before the word-boundary replace.
+    t = t.replace(/(1[0-9]{3}|20[0-2][0-9])([A-Za-z])/g, '____ $2');
     t = t.replace(/\b(1[0-9]{3}|20[0-2][0-9])\b/g, "____");
     t = t.replace(/\b\d+\s+years?\s+(?:after|before|later|earlier)\b/gi, "some time later");
     t = t.replace(/\b(the\s+following\s+(?:year|decade|century|month))\b/gi, "later");
@@ -1996,6 +2013,7 @@ function makeContrast(sentences, count, allTerms, usedSentences) {
       if (shortRight.length < 5 || shortRight.endsWith("…")) continue;
       const question = `"${trimAnswer(left, 70)}…" — what does the passage contrast this with?`;
       if (!questionOk(question)) continue;
+      if (computeLeakageScore(question, shortRight) > 0.45) continue;
       usedSentences.add(s);
       out.push({ type: "fill", question, answer: shortRight, difficulty: "medium", explanation: `From source: "${s}"` });
     }
@@ -2666,7 +2684,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
   }
   else if (qType === "double_fill") qs = makeDoubleFill(ranked, numQ, tfidfScores, allTerms, usedSentences);
   else if (qType === "ordering") qs = makeOrdering(sentencesOrdered, numQ, usedSentences);
-  else if (qType === "error_id") qs = await makeErrorId(ranked, numQ, usedSentences);
+  else if (qType === "error_id") qs = await makeErrorId(ranked, numQ, usedSentences, allTermsWithYears);
   else {
     // Mixed: generate from all types, shuffle, take numQ
     const q = Math.ceil(numQ / 3);
@@ -2679,7 +2697,7 @@ export async function generateNoAiQuiz(text, numQ, qType, lang = "English") {
       makeTF(ranked, q, allTermsWithYears, used1),
       makeVocabContext(ranked, q, tfidfScores, allTermsWithYears, used2),
       makeMCQ(ranked, q, tfidfScores, allTermsWithYears, used3, posPool),
-      makeErrorId(ranked, Math.ceil(q / 2), used4),
+      makeErrorId(ranked, Math.ceil(q / 2), used4, allTermsWithYears),
       makeConceptNetQuestion(ranked, Math.ceil(q / 2), tfidfScores, allTermsWithYears, used5),
     ]);
     // Merge into shared set so sequential builders below don't reuse these sentences
