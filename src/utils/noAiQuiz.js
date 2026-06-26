@@ -44,6 +44,10 @@ const DISTRACTOR_BLOCKLIST = new Set([
 const _datamuseCache = new Map();
 const _datamuse429 = new Set(); // URLs that recently 429'd — skip until auto-cleared
 
+// ── Wordnik response cache ────────────────────────────────────────────────────
+const _wordnikCache = new Map();
+let _wordnik429Until = 0;
+
 // ── Inverted index for distractor proximity ranking ───────────────────────────
 // Rebuilt on each generateNoAiQuiz call. Maps word → Set<lowercase sentence>.
 // Lets rankDistractorsByProximity skip O(candidates × sentences × srcWords) scans.
@@ -70,6 +74,48 @@ async function fetchDatamuseCached(url, timeoutMs = 2500, retries = 1) {
     _datamuseCache.set(url, data);
     return Array.isArray(data) ? data : [];
   } catch { return []; }
+}
+
+// ── Wordnik helpers ───────────────────────────────────────────────────────────
+async function fetchWordnikRelated(word) {
+  if (!word || word.includes(' ') || word.length > 40) return [];
+  if (Date.now() < _wordnik429Until) return [];
+  const key = `related:${word.toLowerCase()}`;
+  if (_wordnikCache.has(key)) return _wordnikCache.get(key);
+  if (_wordnikCache.size > 400) _wordnikCache.delete(_wordnikCache.keys().next().value);
+  try {
+    const res = await fetch(`/api/wordnik?word=${encodeURIComponent(word)}&type=related`,
+      AbortSignal.timeout ? { signal: AbortSignal.timeout(3000) } : {});
+    if (res.status === 429) { _wordnik429Until = Date.now() + 60_000; return []; }
+    if (!res.ok) return [];
+    const data = await res.json();
+    const words = (data.words || [])
+      .filter(({ word: w, rel }) =>
+        w && !DISTRACTOR_BLOCKLIST.has(w.toLowerCase()) &&
+        ['synonym', 'hyponym', 'hypernym', 'similar-to'].includes(rel))
+      .map(({ word: w }) => w.toLowerCase());
+    _wordnikCache.set(key, words);
+    return words;
+  } catch { return []; }
+}
+
+async function fetchWordnikDefinition(word) {
+  if (!word || word.includes(' ') || word.length > 40) return null;
+  if (Date.now() < _wordnik429Until) return null;
+  const key = `def:${word.toLowerCase()}`;
+  if (_wordnikCache.has(key)) return _wordnikCache.get(key);
+  if (_wordnikCache.size > 400) _wordnikCache.delete(_wordnikCache.keys().next().value);
+  try {
+    const res = await fetch(`/api/wordnik?word=${encodeURIComponent(word)}&type=definitions`,
+      AbortSignal.timeout ? { signal: AbortSignal.timeout(3000) } : {});
+    if (res.status === 429) { _wordnik429Until = Date.now() + 60_000; return null; }
+    if (!res.ok) return null;
+    const data = await res.json();
+    const defs = (data.definitions || []).filter(d => d.text && d.text.length >= 15);
+    const result = defs.length ? defs[0] : null;
+    _wordnikCache.set(key, result);
+    return result;
+  } catch { return null; }
 }
 
 // ── Text cleaning ─────────────────────────────────────────────────────────────
@@ -1547,8 +1593,9 @@ function makeDoubleFill(sentences, count, tfidfScores, allTerms, usedSentences) 
 async function fetchDatamuseDistractors(word, textPool, posHint = null) {
   const lenMin = Math.max(3, Math.round(word.length * 0.6));
   const lenMax = Math.round(word.length * 1.6);
-  // Start WordNet early so it runs in parallel with the Datamuse batch below.
+  // Start WordNet and Wordnik early so they run in parallel with Datamuse below.
   const wnFetch = fetchWordNetDistractors(word, posHint);
+  const wordnikFetch = fetchWordnikRelated(word);
   let apiWords = [];
   try {
     const fetches = [
@@ -1568,10 +1615,11 @@ async function fetchDatamuseDistractors(word, textPool, posHint = null) {
       .filter(w => w && w !== word && !w.includes(" ") && w.length >= lenMin && w.length <= lenMax && !DISTRACTOR_BLOCKLIST.has(w));
   } catch {}
 
-  // wnFetch was started before the try block so it overlaps with Datamuse
+  // wnFetch and wordnikFetch were started before the try block — overlap with Datamuse
   const wnWords = await wnFetch;
+  const wordnikWords = (await wordnikFetch).filter(w => w.length >= lenMin && w.length <= lenMax);
   const textWords = textPool.filter(t => t !== word && t.length >= lenMin && t.length <= lenMax);
-  const combined = [...new Set([...apiWords, ...wnWords, ...textWords])];
+  const combined = [...new Set([...apiWords, ...wnWords, ...wordnikWords, ...textWords])];
 
   const filtered = await filterDistractorsBySimilarity(word, combined);
   if (filtered.length >= 3) return shuffle(filtered);
@@ -1616,13 +1664,40 @@ async function makeVocabContext(sentences, count, tfidfScores, allTerms, usedSen
     const kwic = makeKwicBlank(s, original);
     if (!kwic) continue;
 
-    // Detect POS so Datamuse and WordNet use the right relation type
+    // Detect POS so Datamuse/WordNet/Wordnik use the right relation type
     let vocabPosHint = null;
     wink.readDoc(matched).tokens().each(t => {
       if (vocabPosHint) return;
       const p = t.out(its.pos);
       if (p === 'ADJ' || p === 'NOUN' || p === 'VERB') vocabPosHint = p;
     });
+
+    // Try Wordnik definition first — richer question type than pure KWIC fill
+    const wordnikDef = await fetchWordnikDefinition(matched);
+    if (wordnikDef && wordnikDef.text) {
+      // Build definition-choice distractors: fetch definitions of 3 related words
+      const related = (await fetchWordnikRelated(matched)).filter(w => w !== matched).slice(0, 6);
+      const relDefs = (await Promise.all(related.map(fetchWordnikDefinition)))
+        .filter(d => d && d.text && d.text !== wordnikDef.text)
+        .map(d => d.text);
+      if (relDefs.length >= 3) {
+        const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+        const answerDef = cap(wordnikDef.text);
+        const choices = shuffle([answerDef, ...relDefs.slice(0, 3).map(cap)]);
+        usedSentences.add(s);
+        out.push({
+          type: "mcq",
+          question: `What does "${original}" mean as used in the passage?`,
+          choices,
+          answer: choices.indexOf(answerDef),
+          difficulty: "hard",
+          explanation: `"${original}": ${wordnikDef.text}. From source: "${s}"`,
+        });
+        continue;
+      }
+    }
+
+    // Fallback: KWIC fill-in (existing behaviour)
     const rawDistractors = await fetchDatamuseDistractors(matched, fullVocabTerms, vocabPosHint);
     const distractors = normalizeLengthDistribution(matched, rawDistractors).slice(0, 3);
     if (distractors.length < 3) continue;
